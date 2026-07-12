@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.env
+.venv/
+backend/venv/
+node_modules/
+frontend/build/
+backend/uploads/
+backend/reports/
+*.log
+.vscode/
