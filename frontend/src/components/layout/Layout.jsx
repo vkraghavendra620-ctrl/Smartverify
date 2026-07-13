@@ -10,6 +10,7 @@ const PAGE_TITLES = {
   "/verify":       "Verify Application",
   "/gov-verify":   "Government Verification",
   "/reports":      "Reports",
+  "/admin/users":  "Users",
 };
 
 export default function Layout({ children }) {

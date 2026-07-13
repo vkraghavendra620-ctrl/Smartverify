@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "SmartVerify"
     DEBUG: bool = False
     SECRET_KEY: str = "changeme-use-strong-secret-in-production"
-    anthropic_api_key: str = ""
+    gemini_api_key: str = ""
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 480
 
@@ -30,14 +30,14 @@ class Settings(BaseSettings):
     # Toggle between the deterministic pipeline (/verify) and the
     # multi-agent CrewAI pipeline (/verify-agentic).
     CREWAI_ENABLED: bool = True
-    # Model string passed to CrewAI's LLM wrapper, e.g.:
-    #   "anthropic/claude-sonnet-4-6"
+    # Model string passed to CrewAI's LLM wrapper via LiteLLM, e.g.:
+    #   "gemini/gemini-2.5-flash"
     #   "openai/gpt-4o-mini"
     #   "ollama/llama3"
-    CREWAI_MODEL: str = "anthropic/claude-sonnet-4-6"
+    CREWAI_MODEL: str = "gemini/gemini-2.5-flash"
     CREWAI_TEMPERATURE: float = 0.2
     # API keys for the chosen LLM provider are read directly from the
-    # environment by CrewAI/litellm (e.g. ANTHROPIC_API_KEY, OPENAI_API_KEY).
+    # environment by CrewAI/LiteLLM (e.g. GEMINI_API_KEY, OPENAI_API_KEY).
 
     class Config:
         env_file = ".env"

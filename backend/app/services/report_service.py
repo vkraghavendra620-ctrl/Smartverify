@@ -271,7 +271,34 @@ def generate_report(application_id: int, db: Session) -> str:
     story.append(PageBreak())
     story += section_header("8. AI Verification Summary")
     
-    story.append(Paragraph("<b>OCR Summary</b>", h2_style))
+    # Extract Confidence Scores
+    overall_conf = agent_trace.get("overall_ai_confidence", "N/A")
+    findings = agent_trace.get("agent_findings", {})
+    da = findings.get("document_analyst", {})
+    es = findings.get("extraction_specialist", {})
+    vo = findings.get("verification_officer", {})
+    ga = findings.get("gov_verification_agent", {})
+
+    conf_data = [
+        ["Metric", "Confidence Score"],
+        ["Overall AI Confidence", f"{overall_conf}%" if isinstance(overall_conf, (int, float)) else overall_conf],
+        ["OCR Confidence", f"{da.get('ocr_confidence', 'N/A')}%"],
+        ["Extraction Confidence", f"{es.get('extraction_confidence', 'N/A')}%"],
+        ["Verification Confidence", f"{vo.get('verification_confidence', 'N/A')}%"],
+        ["Fraud/Gov Confidence", f"{ga.get('fraud_confidence', 'N/A')}%"]
+    ]
+    ctable = Table(conf_data, colWidths=["50%", "50%"])
+    ctable.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+        ("PADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(Paragraph("<b>AI Confidence Scores</b>", h2_style))
+    story.append(ctable)
+    story.append(Spacer(1, 15))
+
+    story.append(Paragraph("<b>OCR Summary (Agent 1)</b>", h2_style))
     story.append(Paragraph(f"Documents Processed: {len(app.documents) if app.documents else 0} | Engine: EasyOCR / Tesseract", normal))
     
     story.append(Paragraph("<b>NLP Summary (Agent 2)</b>", h2_style))
@@ -308,16 +335,35 @@ def generate_report(application_id: int, db: Session) -> str:
     # 9. Explainable AI
     # ──────────────────────────────────────────────────────────
     story += section_header("9. Explainable AI Trace")
-    findings = agent_trace.get("agent_findings", {})
+    
     for agent_name, payload in findings.items():
         story.append(Paragraph(f"<b>{agent_name.replace('_', ' ').title()}</b>", h2_style))
-        text_payload = json.dumps(payload, indent=2)
-        # Prevent very long outputs from breaking layout
-        if len(text_payload) > 1000:
-            text_payload = text_payload[:1000] + "\\n...[truncated]"
+        explain = payload.get("explainability")
+        if explain:
+            ex_data = [
+                ["Input", Paragraph(str(explain.get("input", "N/A")), normal)],
+                ["Reasoning", Paragraph(str(explain.get("reasoning", "N/A")), normal)],
+                ["Evidence Used", Paragraph(", ".join(explain.get("evidence_used", [])), normal)],
+                ["Tools Invoked", Paragraph(", ".join(explain.get("tools_invoked", [])), normal)],
+                ["Confidence", f"{explain.get('confidence', 'N/A')}%"],
+                ["Decision", Paragraph(str(explain.get("decision", "N/A")), normal)],
+            ]
+            ex_table = Table(ex_data, colWidths=["25%", "75%"])
+            ex_table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f8fafc")),
+                ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+                ("PADDING", (0, 0), (-1, -1), 6),
+                ("VALIGN", (0, 0), (-1, -1), "TOP")
+            ]))
+            story.append(ex_table)
+        else:
+            text_payload = json.dumps(payload, indent=2)
+            if len(text_payload) > 1000:
+                text_payload = text_payload[:1000] + "\\n...[truncated]"
+            story.append(Paragraph(text_payload.replace("\\n", "<br/>").replace(" ", "&nbsp;"), code))
         
-        story.append(Paragraph(text_payload.replace("\\n", "<br/>").replace(" ", "&nbsp;"), code))
-        story.append(Spacer(1, 10))
+        story.append(Spacer(1, 15))
 
     # ──────────────────────────────────────────────────────────
     # 10. Final Recommendation
