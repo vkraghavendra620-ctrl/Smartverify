@@ -27,10 +27,7 @@ CLASSIFICATION_RULES = {
         "income certificate", "annual income", "hereby certify",
         "taluk", "tahsildar", "revenue department"
     ],
-    "employment_cert": [
-        "employment certificate", "relieving letter", "offer letter",
-        "designation", "employment", "hereby appointed"
-    ],
+
     "bank_statement": [
         "bank statement", "account statement", "transaction", "debit",
         "credit", "balance", "ifsc", "branch", "closing balance"

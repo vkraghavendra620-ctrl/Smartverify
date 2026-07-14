@@ -1,11 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Download, FileText, Bot, Cpu, CheckCircle, Clock, AlertTriangle } from 'lucide-react';
+import { Download, FileText, Bot, Cpu } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { getApplications, getReport, downloadReport } from '../services/api';
+import { getApplications, getReport, downloadPDF } from '../services/api';
 import StatusBadge from '../components/ui/StatusBadge';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import { formatDate, formatCurrency } from '../utils/formatters';
-import GovVerification from './GovVerification';
 
 export default function ReportsPage() {
   const [apps, setApps]       = useState([]);
@@ -33,7 +32,19 @@ export default function ReportsPage() {
   }, []);
 
   const handleDownload = (appId) => {
-    window.open(downloadReport(appId), '_blank');
+    const toastId = toast.loading('Downloading PDF...');
+    downloadPDF(appId)
+      .then(res => {
+        const blob = new Blob([res.data], { type: 'application/pdf' });
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = `SmartVerify_Report_${appId}.pdf`;
+        a.click();
+        URL.revokeObjectURL(blobUrl);
+        toast.success('PDF downloaded successfully!', { id: toastId });
+      })
+      .catch(() => toast.error('PDF download failed. Try regenerating first.', { id: toastId }));
   };
 
   if (loading) return <LoadingSpinner size='lg' />;

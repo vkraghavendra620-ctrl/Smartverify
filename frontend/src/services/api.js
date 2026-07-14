@@ -54,6 +54,7 @@ export const runAgenticVerification = (appId) =>
 // ── Reports ────────────────────────────────────────────────────────────────
 export const getReport       = (appId) => api.get(`/report/${appId}`);
 export const downloadReport  = (appId) => `${API_URL}/report/${appId}/download`;
+export const downloadPDF     = (appId) => api.get(`/report/${appId}/download`, { responseType: 'blob' });
 export const regeneratePdf   = (appId) => api.post(`/report/${appId}/regenerate-pdf`);
 
 // ── Dashboard ─────────────────────────────────────────────────────────────

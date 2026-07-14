@@ -8,10 +8,8 @@ from app.db.database import Base
 class DocumentType(str, enum.Enum):
     aadhaar          = "aadhaar"
     pan              = "pan"
-    passport_photo   = "passport_photo"
     salary_slip      = "salary_slip"
     income_cert      = "income_cert"
-    employment_cert  = "employment_cert"
     form_16          = "form_16"
     bank_statement   = "bank_statement"
     loan_application = "loan_application"

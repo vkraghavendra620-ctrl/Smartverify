@@ -40,17 +40,16 @@ def download_report(
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
 
-    # If file is missing on disk (e.g. deleted), regenerate it on the fly
-    if not report.pdf_path or not os.path.exists(report.pdf_path):
-        try:
-            pdf_path = generate_report(application_id=application_id, db=db)
-            report.pdf_path = pdf_path
-            db.commit()
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"PDF regeneration failed: {e}")
+    # Always regenerate to ensure the current report engine (V6) is used.
+    try:
+        pdf_path = generate_report(application_id=application_id, db=db)
+        report.pdf_path = pdf_path
+        db.commit()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {e}")
 
     return FileResponse(
-        report.pdf_path,
+        pdf_path,
         media_type="application/pdf",
         filename=f"SmartVerify_Report_{application_id}.pdf",
     )

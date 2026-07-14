@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import {
   CheckCircle, XCircle, AlertTriangle, Play, Loader,
-  Bot, Cpu, Users, ChevronRight
+  Bot, Cpu, Users, ChevronRight, Info
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { getApplications, runVerification, runAgenticVerification } from '../services/api';
+import { getApplications, getApplication, getDocuments, runVerification, runAgenticVerification } from '../services/api';
 import ScoreGauge from '../components/ui/ScoreGauge';
 import StatusBadge from '../components/ui/StatusBadge';
 
@@ -22,11 +22,117 @@ export default function VerifyPage() {
   const [mode, setMode]       = useState('rule_based');
   const [result, setResult]   = useState(null);
   const [loading, setLoading] = useState(false);
+  const [checking, setChecking] = useState(false);
 
+  // Readiness state
+  const [readiness, setReadiness] = useState({
+    applicationCreated: false,
+    documentsUploaded: false,
+    ocrCompleted: false,
+    nlpCompleted: false,
+    panAadhaarExtracted: false,
+    aadhaarVerification: false,
+    panVerification: false,
+    screenshotUploaded: false,
+    siteVerification: false,
+  });
+
+  // Load applications list
   useEffect(() => { getApplications().then((r) => setApps(r.data)).catch(() => {}); }, []);
+
+  // Check readiness when appId changes
+  useEffect(() => {
+    if (!appId) {
+      setReadiness({
+        applicationCreated: false,
+        documentsUploaded: false,
+        ocrCompleted: false,
+        nlpCompleted: false,
+        panAadhaarExtracted: false,
+        aadhaarVerification: false,
+        panVerification: false,
+        screenshotUploaded: false,
+        siteVerification: false,
+      });
+      return;
+    }
+
+    setChecking(true);
+    Promise.all([
+      getApplication(appId),
+      getDocuments(appId),
+    ])
+    .then(([appRes, docsRes]) => {
+      const app = appRes.data;
+      const docs = docsRes.data || [];
+
+      // Logic for documents (require at least aadhaar and pan)
+      const hasAadhaar = docs.some(d => d.document_type === 'aadhaar');
+      const hasPan = docs.some(d => d.document_type === 'pan');
+      const documentsUploaded = hasAadhaar && hasPan;
+
+      // OCR & NLP logic for mandatory docs
+      const mandatoryDocs = docs.filter(d => ['aadhaar', 'pan'].includes(d.document_type));
+      let ocrCompleted = false;
+      let nlpCompleted = false;
+      if (mandatoryDocs.length > 0) {
+        ocrCompleted = mandatoryDocs.every(d => d.extracted_text && d.extracted_text.trim() !== '');
+        nlpCompleted = mandatoryDocs.every(d => d.structured_data && d.structured_data.trim() !== '');
+      }
+
+      // Extracted PAN & Aadhaar numbers from structured data
+      let extractedPan = false;
+      let extractedAadhaar = false;
+      docs.forEach(d => {
+        if (d.structured_data) {
+          try {
+            const sd = JSON.parse(d.structured_data);
+            if (sd.pan_number) extractedPan = true;
+            if (sd.aadhaar_number) extractedAadhaar = true;
+          } catch (e) {
+            // ignore JSON error
+          }
+        }
+      });
+      const panAadhaarExtracted = extractedPan && extractedAadhaar;
+
+      // Gov Verification logic — V3: requires BOTH steps
+      const govVer = app.gov_verification;
+      const aadhaarVerification = govVer ? (govVer.aadhaar_validity_status && govVer.aadhaar_validity_status !== 'Pending') : false;
+      const panVerification = govVer ? (govVer.pan_aadhaar_link_status && govVer.pan_aadhaar_link_status !== 'Pending') : false;
+      const screenshotUploaded = govVer ? (!!govVer.aadhaar_screenshot_path || !!govVer.screenshot_path) : false;
+
+      // Site verification images logic
+      const hasSiteImage = docs.some(d => d.document_type.startsWith('geo_site_'));
+      const siteVerification = hasSiteImage;
+
+      setReadiness({
+        applicationCreated: !!app,
+        documentsUploaded,
+        ocrCompleted,
+        nlpCompleted,
+        panAadhaarExtracted,
+        aadhaarVerification,
+        panVerification,
+        screenshotUploaded,
+        siteVerification,
+      });
+    })
+    .catch(err => {
+      console.error("Error checking readiness", err);
+    })
+    .finally(() => {
+      setChecking(false);
+    });
+  }, [appId]);
+
+  const isReady = Object.values(readiness).every(Boolean);
+  const completedCount = Object.values(readiness).filter(Boolean).length;
+  const totalChecks = Object.keys(readiness).length;
 
   const handleVerify = async () => {
     if (!appId) return toast.error('Select an application first');
+    if (!isReady) return toast.error('Please complete all verification readiness steps first.');
     setLoading(true);
     setResult(null);
     try {
@@ -39,6 +145,24 @@ export default function VerifyPage() {
       toast.error(err.response?.data?.detail || 'Verification failed');
     } finally { setLoading(false); }
   };
+
+  const ChecklistItem = ({ passed, label, tooltip }) => (
+    <div className={`flex items-center gap-3 p-2 rounded-lg transition-colors group relative cursor-help
+        ${passed ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-800'}`}
+         title={tooltip}>
+      {passed ? (
+        <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+      ) : (
+        <XCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
+      )}
+      <span className="font-medium text-sm flex-1">
+        {!passed && '❌ Missing: '} {label}
+      </span>
+      {!passed && (
+        <Info className="w-4 h-4 text-red-400 opacity-50 group-hover:opacity-100 transition-opacity" />
+      )}
+    </div>
+  );
 
   return (
     <div className='max-w-4xl mx-auto space-y-6'>
@@ -101,8 +225,39 @@ export default function VerifyPage() {
           </div>
         )}
 
-        <button onClick={handleVerify} disabled={loading || !appId}
-          className='btn-primary flex items-center gap-2'>
+        {/* Verification Readiness Checklist */}
+        {appId && (
+          <div className="border border-slate-200 rounded-xl overflow-hidden mt-6">
+            <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex justify-between items-center">
+              <h3 className="font-bold text-slate-700">Verification Readiness</h3>
+              <span className={`text-sm font-semibold px-2.5 py-1 rounded-full ${isReady ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'}`}>
+                {checking ? <Loader className="w-4 h-4 animate-spin" /> : `${completedCount} / ${totalChecks} Complete`}
+              </span>
+            </div>
+            
+            <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <ChecklistItem passed={readiness.applicationCreated} label="Application Created" tooltip="An application profile must be initialized." />
+              <ChecklistItem passed={readiness.documentsUploaded} label="Required Documents Uploaded" tooltip="Aadhaar and PAN documents are mandatory." />
+              <ChecklistItem passed={readiness.ocrCompleted} label="OCR Completed" tooltip="Extracted text is required for mandatory documents." />
+              <ChecklistItem passed={readiness.nlpCompleted} label="NLP Extraction Completed" tooltip="Structured data must be extracted via NLP." />
+              <ChecklistItem passed={readiness.panAadhaarExtracted} label="PAN & Aadhaar Extracted" tooltip="Both PAN and Aadhaar numbers must be extracted by the NLP pipeline." />
+              <ChecklistItem passed={readiness.aadhaarVerification} label="Aadhaar Validity Verified (UIDAI)" tooltip="Step 1: Aadhaar validity must be checked via UIDAI portal." />
+              <ChecklistItem passed={readiness.panVerification} label="PAN–Aadhaar Link Verified" tooltip="Step 2: PAN-Aadhaar linkage must be verified on Income Tax portal." />
+              <ChecklistItem passed={readiness.screenshotUploaded} label="Verification Screenshots Uploaded" tooltip="Screenshots from the portals must be attached." />
+              <ChecklistItem passed={readiness.siteVerification} label="Site Verification Completed" tooltip="At least one site image must be uploaded." />
+            </div>
+            
+            {!isReady && !checking && (
+              <div className="px-4 py-3 bg-red-50 text-red-700 text-sm font-medium border-t border-red-100 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4" />
+                Complete all required verification steps before running AI verification.
+              </div>
+            )}
+          </div>
+        )}
+
+        <button onClick={handleVerify} disabled={loading || !appId || (!isReady && !checking)}
+          className={`btn-primary flex items-center gap-2 mt-4 ${(!isReady || checking) ? 'opacity-50 cursor-not-allowed' : ''}`}>
           {loading ? <Loader className='w-4 h-4 animate-spin' /> : <Play className='w-4 h-4' />}
           {loading ? (mode === 'agentic' ? 'Agents working…' : 'Verifying…') : 'Run Verification'}
         </button>
@@ -149,71 +304,13 @@ export default function VerifyPage() {
                     <AlertTriangle className='w-4 h-4' /> Flagged
                   </span>
                 ) : (
-                  <span className='flex items-center gap-1 text-green-600 text-sm font-medium'>
+                  <span className='flex items-center gap-1 text-emerald-600 text-sm font-medium'>
                     <CheckCircle className='w-4 h-4' /> Clear
                   </span>
                 )}
               </div>
             </div>
           </div>
-
-          {/* Extracted info */}
-          {result.extracted_info && (
-            <div className='card'>
-              <h3 className='font-semibold text-slate-700 mb-3'>Extracted Information</h3>
-              <div className='grid grid-cols-2 md:grid-cols-3 gap-3'>
-                {Object.entries(result.extracted_info)
-                  .filter(([, v]) => v != null)
-                  .map(([k, v]) => (
-                    <div key={k} className='bg-slate-50 p-3 rounded-lg'>
-                      <p className='text-xs text-slate-500 capitalize'>{k.replace(/_/g, ' ')}</p>
-                      <p className='text-sm font-medium text-slate-800 truncate'>{String(v)}</p>
-                    </div>
-                  ))}
-              </div>
-            </div>
-          )}
-
-          {/* Checks */}
-          {result.verification_details?.checks && (
-            <div className='card'>
-              <h3 className='font-semibold text-slate-700 mb-3'>Verification Checks</h3>
-              <div className='space-y-2'>
-                {result.verification_details.checks.map((c, i) => (
-                  <div key={i} className='flex items-start gap-3 p-3 bg-slate-50 rounded-lg'>
-                    {c.passed
-                      ? <CheckCircle className='w-5 h-5 text-green-500 mt-0.5 flex-shrink-0' />
-                      : <XCircle className='w-5 h-5 text-red-500 mt-0.5 flex-shrink-0' />}
-                    <div className='flex-1'>
-                      <div className='flex justify-between'>
-                        <p className='text-sm font-medium'>{c.name}</p>
-                        <span className={`text-xs font-bold ${c.score >= 0.7 ? 'text-green-600' : c.score >= 0.4 ? 'text-yellow-600' : 'text-red-600'}`}>
-                          {(c.score * 100).toFixed(0)}%
-                        </span>
-                      </div>
-                      <p className='text-xs text-slate-500 mt-0.5'>{c.details}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Fraud alerts */}
-          {result.fraud_analysis?.alerts?.length > 0 && (
-            <div className='card border-l-4 border-red-400'>
-              <h3 className='font-semibold text-red-700 mb-2 flex items-center gap-2'>
-                <AlertTriangle className='w-5 h-5' /> Fraud Alerts
-              </h3>
-              <ul className='space-y-1'>
-                {result.fraud_analysis.alerts.map((a, i) => (
-                  <li key={i} className='text-sm text-red-600 flex items-start gap-2'>
-                    <span className='mt-1'>!</span> {a}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
         </div>
       )}
     </div>

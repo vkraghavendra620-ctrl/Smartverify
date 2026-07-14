@@ -174,12 +174,19 @@ def run_agentic_verification(
     gov_record = {}
     if gov_ver:
         gov_record = {
+            # V2: unified PAN-Aadhaar Link status
+            "pan_aadhaar_link_status": gov_ver.pan_aadhaar_link_status,
+            # V3: New Aadhaar Validity status
+            "aadhaar_validity_status": gov_ver.aadhaar_validity_status,
+            "aadhaar_screenshot_path": gov_ver.aadhaar_screenshot_path,
+            # Backward compat fields (may be None for new records)
             "aadhaar_status": gov_ver.aadhaar_status,
             "pan_status": gov_ver.pan_status,
             "tax_receipt_status": gov_ver.tax_receipt_status,
             "officer_name": gov_ver.officer_name,
             "timestamp": gov_ver.timestamp,
-            "remarks": gov_ver.remarks
+            "remarks": gov_ver.remarks,
+            "screenshot_path": gov_ver.screenshot_path,
         }
 
     try:

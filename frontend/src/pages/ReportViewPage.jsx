@@ -4,12 +4,11 @@ import {
   ArrowLeft, Printer, Download, Building2, User, Users,
   CreditCard, Home, MapPin, ShieldCheck, Bot, CheckCircle2,
   XCircle, Clock, AlertTriangle, FileText, Eye, Stamp,
-  BarChart3, Cpu, ThumbsUp, ThumbsDown, RotateCcw,
-  Calendar, Phone, Mail, Hash, Landmark, FileImage,
-  ChevronRight, Info, BadgeCheck, Fingerprint
+  BarChart3, Cpu, ThumbsUp, RotateCcw,
+  Calendar, Hash, Landmark, ChevronRight, Fingerprint
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { getApplication, getReport, getDocuments, downloadReport, regeneratePdf } from '../services/api';
+import { getApplication, getReport, getDocuments, downloadPDF, regeneratePdf } from '../services/api';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import { useAuth } from '../context/AuthContext';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
@@ -176,16 +175,10 @@ export default function ReportViewPage() {
   const handlePrint = () => window.print();
 
   const handleDownloadPdf = () => {
-    const url = downloadReport(appId);
-    const token = localStorage.getItem('token');
-    // Fetch as blob with auth header
     setPdfLoading(true);
-    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+    downloadPDF(appId)
       .then(res => {
-        if (!res.ok) throw new Error('PDF download failed');
-        return res.blob();
-      })
-      .then(blob => {
+        const blob = new Blob([res.data], { type: 'application/pdf' });
         const blobUrl = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = blobUrl;
@@ -225,7 +218,7 @@ export default function ReportViewPage() {
   const getDocs = (type)  => docs.filter(d => d.document_type === type);
   const getJointDocs = (type, idx) => docs.filter(d => d.document_type === type && d.joint_applicant_index === idx);
 
-  const passportPhoto = getDoc('passport_photo');
+
   const aadhaarDoc    = getDoc('aadhaar');
   const panDoc        = getDoc('pan');
 
@@ -372,20 +365,7 @@ export default function ReportViewPage() {
             subtitle="Primary applicant information extracted from documents" color="blue" />
           <div className="p-6">
             <div className="flex gap-6 flex-wrap">
-              {/* Passport Photo */}
-              <div className="flex-shrink-0">
-                {passportPhoto ? (
-                  <img src={docUrl(passportPhoto.file_path)} alt="Passport"
-                    className="w-28 h-32 object-cover rounded-xl border-2 border-slate-200 shadow" />
-                ) : (
-                  <div className="w-28 h-32 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50
-                    flex flex-col items-center justify-center gap-1 text-slate-400">
-                    <User className="w-8 h-8" />
-                    <span className="text-xs text-center">Photo Not<br />Uploaded</span>
-                  </div>
-                )}
-                <p className="text-center text-xs text-slate-500 mt-1 font-medium">Passport Photo</p>
-              </div>
+
 
               {/* Info Grid */}
               <div className="flex-1 min-w-[260px]">
@@ -437,11 +417,11 @@ export default function ReportViewPage() {
             ) : (
               <div className="space-y-4">
                 {joints.map((ja, i) => {
-                  const jaPhoto    = getJointDocs('passport_photo', ja.index)[0];
+
                   const jaAadhaar  = getJointDocs('aadhaar', ja.index)[0];
                   const jaPan      = getJointDocs('pan', ja.index)[0];
                   const jaSalary   = getJointDocs('salary_slip', ja.index)[0];
-                  const jaEmpCert  = getJointDocs('employment_cert', ja.index)[0];
+
                   return (
                     <div key={ja.id} className="border border-slate-200 rounded-xl overflow-hidden">
                       <div className="bg-teal-50 border-b border-teal-100 px-4 py-2 flex items-center gap-2">
@@ -453,19 +433,7 @@ export default function ReportViewPage() {
                         </span>
                       </div>
                       <div className="p-4 flex gap-5 flex-wrap">
-                        {/* Photo */}
-                        <div className="flex-shrink-0">
-                          {jaPhoto ? (
-                            <img src={docUrl(jaPhoto.file_path)} alt={`JA ${i + 1}`}
-                              className="w-20 h-24 object-cover rounded-lg border border-slate-200" />
-                          ) : (
-                            <div className="w-20 h-24 rounded-lg border-2 border-dashed border-slate-200
-                              bg-slate-50 flex flex-col items-center justify-center gap-1 text-slate-400">
-                              <User className="w-6 h-6" />
-                              <span className="text-xs">No Photo</span>
-                            </div>
-                          )}
-                        </div>
+
                         {/* Info */}
                         <div className="flex-1 min-w-[200px] grid grid-cols-1 sm:grid-cols-2 gap-x-6">
                           <div>
@@ -474,7 +442,7 @@ export default function ReportViewPage() {
                             <InfoRow label="Email"        value={ja.email} />
                           </div>
                           <div>
-                            <InfoRow label="Employment"   value={jaSalary || jaEmpCert ? 'Documents uploaded' : undefined} />
+                            <InfoRow label="Employment"   value={jaSalary ? 'Documents uploaded' : undefined} />
                             <InfoRow label="Remarks"      value={ja.remarks} />
                           </div>
                         </div>
@@ -484,7 +452,7 @@ export default function ReportViewPage() {
                             { doc: jaAadhaar, label: 'Aadhaar' },
                             { doc: jaPan,     label: 'PAN' },
                             { doc: jaSalary,  label: 'Salary Slip' },
-                            { doc: jaEmpCert, label: 'Emp. Certificate' },
+
                           ].map(({ doc, label }) => (
                             <span key={label} className={`text-xs px-2 py-0.5 rounded-full border font-medium
                               ${doc ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
@@ -587,7 +555,6 @@ export default function ReportViewPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-x-10">
                   <div>
                     <InfoRow label="Officer Name"          value={siteVer.officer_name} />
-                    <InfoRow label="Officer ID"            value={siteVer.officer_id} mono />
                     <InfoRow label="Visit Date"            value={siteVer.date} />
                     <InfoRow label="Visit Time"            value={siteVer.time} />
                     <InfoRow label="GPS Coordinates"       value={siteVer.gps_coordinates} mono />
@@ -659,63 +626,64 @@ export default function ReportViewPage() {
               }
 
               return (
-                <div className="space-y-4">
+                <div className="space-y-5">
                   {govModel && (
                     <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2 text-xs font-semibold text-emerald-700">
                       <CheckCircle2 className="w-4 h-4" /> Officer-verified record on file — Verified by: {govModel.officer_name || 'N/A'}
                     </div>
                   )}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                    {/* Aadhaar */}
-                    <div className="border border-slate-200 rounded-xl overflow-hidden">
-                      <div className="bg-orange-50 border-b border-orange-100 px-4 py-2.5 flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <Fingerprint className="w-4 h-4 text-orange-600" />
-                          <span className="font-semibold text-orange-800 text-sm">Aadhaar</span>
-                        </div>
-                        {getStatusPill(govModel?.aadhaar_status || govAI?.aadhaar)}
-                      </div>
-                      <div className="p-4 space-y-2">
-                        <InfoRow label="Aadhaar No." value={extracted.aadhaar_number || extracted.aadhaar || '—'} mono />
-                        <InfoRow label="Timestamp" value={govModel?.timestamp || 'Not Available'} />
-                        <InfoRow label="Officer" value={govModel?.officer_name || 'Not Available'} />
-                      </div>
-                    </div>
 
-                    {/* PAN */}
-                    <div className="border border-slate-200 rounded-xl overflow-hidden">
-                      <div className="bg-indigo-50 border-b border-indigo-100 px-4 py-2.5 flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <CreditCard className="w-4 h-4 text-indigo-600" />
-                          <span className="font-semibold text-indigo-800 text-sm">PAN</span>
-                        </div>
-                        {getStatusPill(govModel?.pan_status || govAI?.pan)}
+                  {/* Step 1 — Aadhaar Validity (UIDAI) */}
+                  <div className="border border-slate-200 rounded-xl overflow-hidden">
+                    <div className="bg-blue-50 border-b border-blue-100 px-4 py-2.5 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold flex-shrink-0">1</div>
+                        <Fingerprint className="w-4 h-4 text-blue-600" />
+                        <span className="font-semibold text-blue-800 text-sm">UIDAI Aadhaar Validity</span>
                       </div>
-                      <div className="p-4 space-y-2">
-                        <InfoRow label="PAN No." value={extracted.pan_number || extracted.pan || '—'} mono />
-                        <InfoRow label="Timestamp" value={govModel?.timestamp || 'Not Available'} />
-                        <InfoRow label="Officer" value={govModel?.officer_name || 'Not Available'} />
-                      </div>
+                      {getStatusPill(govModel?.aadhaar_validity_status || govAI?.aadhaar)}
                     </div>
-
-                    {/* Tax Receipt */}
-                    <div className="border border-slate-200 rounded-xl overflow-hidden">
-                      <div className="bg-emerald-50 border-b border-emerald-100 px-4 py-2.5 flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <FileText className="w-4 h-4 text-emerald-600" />
-                          <span className="font-semibold text-emerald-800 text-sm">Tax Receipt</span>
+                    <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <InfoRow label="Aadhaar No." value={extracted.aadhaar_number || extracted.aadhaar || '—'} mono />
+                      <InfoRow label="Status" value={govModel?.aadhaar_validity_status || 'Pending'} />
+                      <InfoRow label="Officer" value={govModel?.officer_name || 'Not Available'} />
+                      <InfoRow label="Verification Date" value={govModel?.timestamp || 'Not Available'} />
+                      {govModel?.aadhaar_screenshot_path && (
+                        <div className="sm:col-span-2">
+                          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">UIDAI Screenshot</p>
+                          <p className="text-sm text-slate-600 font-mono">{govModel.aadhaar_screenshot_path}</p>
                         </div>
-                        {getStatusPill(govModel?.tax_receipt_status || govAI?.tax_receipt)}
-                      </div>
-                      <div className="p-4 space-y-2">
-                        <InfoRow label="Timestamp" value={govModel?.timestamp || 'Not Available'} />
-                        <InfoRow label="Officer" value={govModel?.officer_name || 'Not Available'} />
-                      </div>
+                      )}
                     </div>
                   </div>
-                  
+
+                  {/* Step 2 — PAN–Aadhaar Link (Income Tax) */}
+                  <div className="border border-slate-200 rounded-xl overflow-hidden">
+                    <div className="bg-indigo-50 border-b border-indigo-100 px-4 py-2.5 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-bold flex-shrink-0">2</div>
+                        <CreditCard className="w-4 h-4 text-indigo-600" />
+                        <span className="font-semibold text-indigo-800 text-sm">PAN–Aadhaar Link Status</span>
+                      </div>
+                      {getStatusPill(govModel?.pan_aadhaar_link_status || govAI?.pan)}
+                    </div>
+                    <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <InfoRow label="PAN No." value={extracted.pan_number || extracted.pan || '—'} mono />
+                      <InfoRow label="Aadhaar No." value={extracted.aadhaar_number || extracted.aadhaar || '—'} mono />
+                      <InfoRow label="Link Status" value={govModel?.pan_aadhaar_link_status || 'Pending'} />
+                      <InfoRow label="Officer" value={govModel?.officer_name || 'Not Available'} />
+                      <InfoRow label="Verification Date" value={govModel?.timestamp || 'Not Available'} />
+                      {govModel?.screenshot_path && (
+                        <div className="sm:col-span-2">
+                          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Portal Screenshot</p>
+                          <p className="text-sm text-slate-600 font-mono">{govModel.screenshot_path}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
                   {govModel?.remarks && (
-                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 mt-4">
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
                       <p className="text-xs font-semibold text-slate-500 uppercase mb-2">Officer Remarks</p>
                       <p className="text-sm text-slate-700">{govModel.remarks}</p>
                     </div>
@@ -725,6 +693,7 @@ export default function ReportViewPage() {
             })()}
           </div>
         </div>
+
 
         {/* ══════════════════════════════════════════════════════════════════
             SECTION 8 — AI VERIFICATION SUMMARY

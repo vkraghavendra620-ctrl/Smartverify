@@ -128,8 +128,7 @@ def build_tasks(agents: dict, run_context: dict) -> list:
             '    "decision": "<final analytical decision>"\n'
             '  }\n'
             "}\n\n"
-            "Required document types for a home loan are: aadhaar, pan, salary_slip "
-            "(or income_cert or form_16), and optionally employment_cert.\n"
+            "Required document types for a home loan are: aadhaar, pan, and at least one income document (salary_slip, income_cert, or form_16).\n"
             "Return ONLY this JSON object, with no extra commentary."
         ),
         expected_output=(
@@ -275,20 +274,19 @@ def build_tasks(agents: dict, run_context: dict) -> list:
             "CRITICAL: You MUST also use the fraud_detection_tool with the applicant profile to check for duplicate Aadhaar, PAN, and other historical fraud patterns.\n"
             "You MUST use this retrieved historical context and fraud tool output in your reasoning.\n\n"
             "Rules:\n"
-            "  1. Verify the OCR-extracted aadhaar_number from the profile matches the officer's record.\n"
-            "  2. Verify the OCR-extracted pan_number from the profile matches the officer's record.\n"
-            "  3. Verify Aadhaar, PAN, and Tax Receipt statuses in the officer's record are 'Verified' or 'Passed'.\n"
-            "  4. Check for missing screenshots, missing timestamps, or missing officer names.\n"
-            "  5. If any verification is failed, mark 'requires_manual_review' = true and add to 'issues'.\n"
-            "  6. If screenshot, timestamp, or officer name is missing, mark 'requires_manual_review' = true, "
-            "set verification_status to 'Verification Incomplete', and add to 'issues'.\n"
-            "  7. If all checks pass, set verification_status to 'Government Verification Passed' and "
-            "'requires_manual_review' = false.\n\n"
+            "  1. Verify the OCR-extracted aadhaar_number and pan_number from the profile match the officer's record.\n"
+            "  2. Verify aadhaar_validity_status in the officer's record is 'Valid'.\n"
+            "  3. Verify pan_aadhaar_link_status in the officer's record is 'Linked'.\n"
+            "  4. If Aadhaar Valid AND PAN-Aadhaar Linked, confidence should be increased.\n"
+            "  5. If Aadhaar Invalid OR PAN-Aadhaar Not Linked, flag application immediately and increase fraud risk score.\n"
+            "  6. If either status is 'Pending' or 'Manual Review Required', flag application, mark 'requires_manual_review' = true and add to 'issues'.\n"
+            "  7. Check for missing screenshots, missing timestamps, or missing officer names. If any are missing, set verification_status to 'Verification Incomplete' and 'requires_manual_review' = true.\n"
+            "  8. If all checks pass and both statuses are positive, set verification_status to 'Government Verification Passed' and 'requires_manual_review' = false.\n\n"
             "Return ONLY a JSON object with this exact shape:\n"
             "{\n"
             '  "government_verification": {\n'
-            '    "aadhaar": "<status>",\n'
-            '    "pan": "<status>",\n'
+            '    "aadhaar_validity_status": "<status>",\n'
+            '    "pan_aadhaar_link_status": "<status>",\n'
             '    "tax_receipt": "<status>",\n'
             '    "verification_status": "Government Verification Passed" | "Verification Incomplete" | "Manual Review",\n'
             '    "issues": ["<issue 1>", "<issue 2>"],\n'
@@ -314,7 +312,7 @@ def build_tasks(agents: dict, run_context: dict) -> list:
         ),
         expected_output=(
             "A single JSON object containing a 'government_verification' key, which holds "
-            "aadhaar, pan, tax_receipt, verification_status, issues, remarks, requires_manual_review, "
+            "aadhaar_validity_status, pan_aadhaar_link_status, tax_receipt, verification_status, issues, remarks, requires_manual_review, "
             "fraud fields, and explainability."
         ),
         agent=agents["gov_verification_agent"],

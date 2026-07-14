@@ -117,7 +117,7 @@ class VerificationEngine:
         """Check that at least identity + income proof are present."""
         types = {d.get("document_type") for d in documents}
         has_id     = bool(types & {"aadhaar", "pan"})
-        has_income = bool(types & {"salary_slip", "income_cert"})
+        has_income = bool(types & {"salary_slip", "income_cert", "form_16"})
         has_bank   = "bank_statement" in types
         score = (0.4 * has_id) + (0.4 * has_income) + (0.2 * has_bank)
         return {

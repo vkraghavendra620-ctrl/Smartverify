@@ -18,12 +18,10 @@ import { PROPERTY_CONDITIONS } from '../utils/constants';
 const APPLICANT_DOCS = [
   { value: 'aadhaar',         label: 'Aadhaar Card', required: true },
   { value: 'pan',             label: 'PAN Card', required: true },
-  { value: 'passport_photo',  label: 'Passport Photograph', required: true },
 ];
 
 const EMPLOYMENT_DOCS = [
   { value: 'salary_slip',     label: 'Salary Slip' },
-  { value: 'employment_cert', label: 'Employment Certificate' },
   { value: 'form_16',         label: 'Form 16' },
 ];
 
@@ -46,9 +44,7 @@ const PROPERTY_IMAGES = [
 const JOINT_DOC_TYPES = [
   { value: 'aadhaar',         label: 'Aadhaar Card' },
   { value: 'pan',             label: 'PAN Card' },
-  { value: 'passport_photo',  label: 'Passport Photograph' },
   { value: 'salary_slip',     label: 'Salary Slip' },
-  { value: 'employment_cert', label: 'Employment Certificate' },
 ];
 
 // ─── Dropzone helper ──────────────────────────────────────────────────────────
@@ -307,7 +303,7 @@ export default function UploadPage() {
 
   // Site verification form
   const [siteForm, setSiteForm] = useState({
-    officer_name: '', officer_id: '', date: '', time: '',
+    officer_name: '', date: '', time: '',
     gps_coordinates: '', remarks: '', property_condition: '',
     construction_quality: '', boundary_present: '', road_access: '',
     utilities_available: []
@@ -544,11 +540,11 @@ export default function UploadPage() {
                 </div>
                 <div>
                   <label className='block text-xs font-medium text-slate-700 mb-1'>Market Value (₹)</label>
-                  <input type='number' className='input' value={propForm.market_value} onChange={e => propUpd('market_value', e.target.value)} required />
+                  <input type='number' className='input' value={propForm.market_value} onChange={e => propUpd('market_value', e.target.value)} />
                 </div>
                 <div>
                   <label className='block text-xs font-medium text-slate-700 mb-1'>Loan Security Value (₹)</label>
-                  <input type='number' className='input' value={propForm.loan_security_value} onChange={e => propUpd('loan_security_value', e.target.value)} required />
+                  <input type='number' className='input' value={propForm.loan_security_value} onChange={e => propUpd('loan_security_value', e.target.value)} />
                 </div>
                 <div>
                   <label className='block text-xs font-medium text-slate-700 mb-1'>Property Area</label>
@@ -670,10 +666,6 @@ export default function UploadPage() {
                   <div>
                     <label className='block text-xs font-medium text-slate-700 mb-1'>Officer Name *</label>
                     <input type='text' value={siteForm.officer_name} onChange={(e) => siteUpd('officer_name', e.target.value)} className='input' placeholder='Full name' required />
-                  </div>
-                  <div>
-                    <label className='block text-xs font-medium text-slate-700 mb-1'>Officer ID *</label>
-                    <input type='text' value={siteForm.officer_id} onChange={(e) => siteUpd('officer_id', e.target.value)} className='input' placeholder='Employee ID' required />
                   </div>
                   <div>
                     <label className='block text-xs font-medium text-slate-700 mb-1'>Visit Date *</label>

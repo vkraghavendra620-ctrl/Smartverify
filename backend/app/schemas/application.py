@@ -6,7 +6,6 @@ from app.models.application import ApplicationStatus
 class SiteVerificationCreate(BaseModel):
     gps_coordinates: Optional[str] = None
     officer_name: Optional[str] = None
-    officer_id: Optional[str] = None
     date: Optional[str] = None
     time: Optional[str] = None
     property_condition: Optional[str] = None
@@ -21,7 +20,6 @@ class SiteVerificationOut(BaseModel):
     application_id: int
     gps_coordinates: Optional[str]
     officer_name: Optional[str]
-    officer_id: Optional[str]
     date: Optional[str]
     time: Optional[str]
     property_condition: Optional[str]
@@ -95,23 +93,27 @@ class PropertyDetailsOut(BaseModel):
         from_attributes = True
 
 class GovVerificationCreate(BaseModel):
-    aadhaar_status: Optional[str] = None
-    pan_status: Optional[str] = None
+    pan_aadhaar_link_status: Optional[str] = None
     tax_receipt_status: Optional[str] = None
+    aadhaar_validity_status: Optional[str] = None
+    aadhaar_screenshot_path: Optional[str] = None
     officer_name: Optional[str] = None
     timestamp: Optional[str] = None
     remarks: Optional[str] = None
-    verification_screenshots: Optional[str] = None
+    screenshot_path: Optional[str] = None
+    verification_screenshots: Optional[str] = None # Backward compatibility
 
 class GovVerificationOut(BaseModel):
     id: int
     application_id: int
-    aadhaar_status: Optional[str]
-    pan_status: Optional[str]
+    pan_aadhaar_link_status: Optional[str]
     tax_receipt_status: Optional[str]
+    aadhaar_validity_status: Optional[str]
+    aadhaar_screenshot_path: Optional[str]
     officer_name: Optional[str]
     timestamp: Optional[str]
     remarks: Optional[str]
+    screenshot_path: Optional[str]
     verification_screenshots: Optional[str]
     created_at: datetime
     class Config:

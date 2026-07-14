@@ -66,7 +66,7 @@ class DocumentClassificationTool(BaseTool):
     name: str = "document_classification_tool"
     description: str = (
         "Classifies a document into one of: aadhaar, pan, salary_slip, "
-        "income_cert, employment_cert, bank_statement, loan_application. "
+        "income_cert, bank_statement, loan_application. "
         "Input: text (OCR output) and optional filename. Returns a JSON "
         "string with 'document_type' and 'confidence'."
     )
