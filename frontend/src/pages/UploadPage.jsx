@@ -4,12 +4,13 @@ import { useDropzone } from 'react-dropzone';
 import {
   Upload, FileCheck, AlertCircle, Loader, Plus, X,
   MapPin, Camera, ChevronDown, ChevronUp, User, Briefcase, Home, Image,
-  CheckCircle, FileText
+  CheckCircle, FileText, AlertTriangle
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import {
   uploadDocument, processDocument, getDocuments,
-  getApplications, submitSiteVerification, submitJointApplicant, submitPropertyDetails
+  getApplications, submitSiteVerification, submitJointApplicant, submitPropertyDetails,
+  updateApplicantDetails
 } from '../services/api';
 import { PROPERTY_CONDITIONS } from '../utils/constants';
 
@@ -284,6 +285,283 @@ function JointApplicantCard({ index, applicationId, onRemove, uploadedDocs, onUp
   );
 }
 
+// ─── Applicant Details Form Card ──────────────────────────────────────────────
+
+function ApplicantDetailsCard({ applicationId, uploadedDocs, currentApp, onSaved }) {
+  const [form, setForm] = useState({
+    applicant_name: '',
+    aadhaar_number: '',
+    pan_number: '',
+    dob: '',
+    gender: '',
+    address: '',
+    father_name: ''
+  });
+  const [userEdited, setUserEdited] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [maskAadhaar, setMaskAadhaar] = useState(true);
+
+  // Parse structured_data from documents
+  const parseSD = (doc) => {
+    if (!doc || !doc.structured_data) return {};
+    try { return JSON.parse(doc.structured_data); } catch { return {}; }
+  };
+
+  const aadhaarDoc = uploadedDocs.find(d => d.document_type === 'aadhaar' && !d.joint_applicant_index);
+  const panDoc     = uploadedDocs.find(d => d.document_type === 'pan' && !d.joint_applicant_index);
+
+  const aadhaarSD = parseSD(aadhaarDoc);
+  const panSD     = parseSD(panDoc);
+
+  const aadhaarProcessing = aadhaarDoc && aadhaarDoc.processed < 2;
+  const panProcessing     = panDoc && panDoc.processed < 2;
+
+  // Extracted values by priority
+  const extractedName    = aadhaarSD.applicant_name || panSD.applicant_name || null;
+  const nameSource       = aadhaarSD.applicant_name ? 'Aadhaar' : (panSD.applicant_name ? 'PAN' : null);
+
+  const extractedAadhaar = aadhaarSD.aadhaar_number || null;
+
+  const extractedPan     = panSD.pan_number || null;
+
+  const extractedDob     = aadhaarSD.dob || panSD.dob || null;
+  const dobSource        = aadhaarSD.dob ? 'Aadhaar' : (panSD.dob ? 'PAN' : null);
+
+  const extractedGender  = aadhaarSD.gender || null;
+
+  const extractedAddress = aadhaarSD.address || null;
+
+  const extractedFather  = panSD.father_name || null;
+
+  // Sync saved application values and auto-fill empty fields
+  useEffect(() => {
+    setForm(prev => {
+      const next = { ...prev };
+      const app = currentApp || {};
+
+      const resolveVal = (key, extractedVal, savedVal) => {
+        if (savedVal) return savedVal;
+        if (userEdited[key]) return prev[key];
+        if (!prev[key] && extractedVal) return extractedVal;
+        return prev[key] || '';
+      };
+
+      next.applicant_name = resolveVal('applicant_name', extractedName, app.applicant_name);
+      next.aadhaar_number = resolveVal('aadhaar_number', extractedAadhaar, app.aadhaar_number);
+      next.pan_number     = resolveVal('pan_number', extractedPan, app.pan_number);
+      next.dob            = resolveVal('dob', extractedDob, app.dob);
+      next.gender         = resolveVal('gender', extractedGender, app.gender);
+      next.address        = resolveVal('address', extractedAddress, app.address);
+      next.father_name    = resolveVal('father_name', extractedFather, app.father_name);
+
+      return next;
+    });
+  }, [currentApp, extractedName, extractedAadhaar, extractedPan, extractedDob, extractedGender, extractedAddress, extractedFather]);
+
+  const normStr = s => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const normAadhaar = s => (s || '').replace(/[\s-]/g, '');
+  const normPan = s => (s || '').trim().toUpperCase();
+  const normDob = s => (s || '').replace(/[\/\-\.\s]/g, '');
+
+  const areNamesEquivalent = (nameA, nameB) => {
+    if (!nameA || !nameB) return true;
+    const tokensA = nameA.trim().toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(Boolean);
+    const tokensB = nameB.trim().toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(Boolean);
+    const setA = new Set(tokensA);
+    const setB = new Set(tokensB);
+    if (setA.size !== setB.size) return false;
+    for (const token of setA) {
+      if (!setB.has(token)) return false;
+    }
+    return true;
+  };
+
+  const nameMismatch = (aadhaarSD.applicant_name && panSD.applicant_name) &&
+    !areNamesEquivalent(aadhaarSD.applicant_name, panSD.applicant_name);
+
+  const dobMismatch = (aadhaarSD.dob && panSD.dob) &&
+    normDob(aadhaarSD.dob) !== normDob(panSD.dob);
+
+  const handleChange = (field, val) => {
+    setForm(prev => ({ ...prev, [field]: val }));
+    setUserEdited(prev => ({ ...prev, [field]: true }));
+  };
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await updateApplicantDetails(applicationId, form);
+      toast.success('Applicant details saved successfully!');
+      if (onSaved) onSaved();
+    } catch {
+      toast.error('Failed to save applicant details');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const renderBadge = (fieldName, extractedVal, sourceName, isProcessing) => {
+    if (isProcessing) {
+      return (
+        <span className="text-[11px] font-medium text-amber-600 flex items-center gap-1 mt-1">
+          <Loader className="w-3 h-3 animate-spin inline" /> Waiting for document processing...
+        </span>
+      );
+    }
+    if (extractedVal) {
+      return (
+        <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 inline-flex items-center gap-1 mt-1">
+          ✓ Extracted from {sourceName}
+        </span>
+      );
+    }
+    return (
+      <span className="text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 inline-flex items-center gap-1 mt-1">
+        ⚠ Not extracted — enter manually
+      </span>
+    );
+  };
+
+  const renderMismatchWarning = (fieldName, userVal, extractedVal, normFn, sourceName) => {
+    if (!userVal || !extractedVal) return null;
+    if (normFn(userVal) === normFn(extractedVal)) return null;
+
+    return (
+      <div className="mt-1.5 p-2 bg-amber-50 border border-amber-200 rounded-lg text-xs space-y-1">
+        <div className="flex items-center gap-1 text-amber-800 font-semibold">
+          <AlertTriangle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" /> ⚠ Mismatch detected
+        </div>
+        <div className="text-slate-600">
+          User value: <span className="font-mono font-medium text-slate-800">{userVal}</span>
+        </div>
+        <div className="text-slate-600">
+          Extracted: <span className="font-mono font-medium text-slate-800">{extractedVal}</span>
+        </div>
+        <div className="flex gap-2 mt-1">
+          <button type="button" onClick={() => handleChange(fieldName, extractedVal)}
+            className="px-2 py-0.5 bg-amber-600 text-white rounded text-[11px] font-medium hover:bg-amber-700">
+            Use Extracted Value
+          </button>
+          <button type="button" onClick={() => setUserEdited(prev => ({ ...prev, [fieldName]: true }))}
+            className="px-2 py-0.5 bg-slate-200 text-slate-700 rounded text-[11px] font-medium hover:bg-slate-300">
+            Keep Entered Value
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  const formatAadhaarDisplay = (val) => {
+    if (!val) return '';
+    const clean = normAadhaar(val);
+    if (maskAadhaar && clean.length >= 12) {
+      return `XXXX XXXX ${clean.slice(-4)}`;
+    }
+    return val;
+  };
+
+  return (
+    <Section icon={User} title="Applicant Details" color="blue">
+      <form onSubmit={handleSave} className="space-y-4">
+        {(nameMismatch || dobMismatch) && (
+          <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs space-y-1.5 mb-2">
+            <div className="flex items-center gap-1.5 text-red-800 font-bold">
+              <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0" /> ⚠ Aadhaar/PAN information mismatch detected between uploaded documents
+            </div>
+            {nameMismatch && (
+              <div className="text-red-700">
+                • <strong>Name:</strong> Aadhaar has <span className="font-semibold">"{aadhaarSD.applicant_name}"</span> vs PAN has <span className="font-semibold">"{panSD.applicant_name}"</span>
+              </div>
+            )}
+            {dobMismatch && (
+              <div className="text-red-700">
+                • <strong>Date of Birth:</strong> Aadhaar has <span className="font-semibold">"{aadhaarSD.dob}"</span> vs PAN has <span className="font-semibold">"{panSD.dob}"</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {/* Applicant Name */}
+          <div>
+            <label className="block text-xs font-medium text-slate-700 mb-1">Applicant Name</label>
+            <input type="text" className="input" value={form.applicant_name} onChange={e => handleChange('applicant_name', e.target.value)} placeholder="Full Name" />
+            {renderBadge('applicant_name', extractedName, nameSource, aadhaarProcessing || panProcessing)}
+            {renderMismatchWarning('applicant_name', form.applicant_name, extractedName, normStr, nameSource)}
+          </div>
+
+          {/* Aadhaar Number */}
+          <div>
+            <div className="flex justify-between items-center mb-1">
+              <label className="block text-xs font-medium text-slate-700">Aadhaar Number</label>
+              {form.aadhaar_number && (
+                <button type="button" onClick={() => setMaskAadhaar(!maskAadhaar)} className="text-[11px] text-blue-600 hover:underline flex items-center gap-1">
+                  {maskAadhaar ? 'Unmask' : 'Mask'}
+                </button>
+              )}
+            </div>
+            <input type="text" className="input font-mono" value={formatAadhaarDisplay(form.aadhaar_number)} onChange={e => handleChange('aadhaar_number', e.target.value)} placeholder="12-digit Aadhaar Number" />
+            {renderBadge('aadhaar_number', extractedAadhaar, 'Aadhaar', aadhaarProcessing)}
+            {renderMismatchWarning('aadhaar_number', form.aadhaar_number, extractedAadhaar, normAadhaar, 'Aadhaar')}
+          </div>
+
+          {/* PAN Number */}
+          <div>
+            <label className="block text-xs font-medium text-slate-700 mb-1">PAN Number</label>
+            <input type="text" className="input font-mono uppercase" value={form.pan_number} onChange={e => handleChange('pan_number', e.target.value.toUpperCase())} placeholder="10-character PAN Number" />
+            {renderBadge('pan_number', extractedPan, 'PAN', panProcessing)}
+            {renderMismatchWarning('pan_number', form.pan_number, extractedPan, normPan, 'PAN')}
+          </div>
+
+          {/* Date of Birth */}
+          <div>
+            <label className="block text-xs font-medium text-slate-700 mb-1">Date of Birth</label>
+            <input type="text" className="input" value={form.dob} onChange={e => handleChange('dob', e.target.value)} placeholder="DD/MM/YYYY" />
+            {renderBadge('dob', extractedDob, dobSource, aadhaarProcessing || panProcessing)}
+            {renderMismatchWarning('dob', form.dob, extractedDob, normDob, dobSource)}
+          </div>
+
+          {/* Gender */}
+          <div>
+            <label className="block text-xs font-medium text-slate-700 mb-1">Gender</label>
+            <select className="input" value={form.gender} onChange={e => handleChange('gender', e.target.value)}>
+              <option value="">Select Gender</option>
+              <option value="Male">Male</option>
+              <option value="Female">Female</option>
+              <option value="Transgender">Transgender</option>
+            </select>
+            {renderBadge('gender', extractedGender, 'Aadhaar', aadhaarProcessing)}
+            {renderMismatchWarning('gender', form.gender, extractedGender, normStr, 'Aadhaar')}
+          </div>
+
+          {/* Father's Name */}
+          <div>
+            <label className="block text-xs font-medium text-slate-700 mb-1">Father's Name</label>
+            <input type="text" className="input" value={form.father_name} onChange={e => handleChange('father_name', e.target.value)} placeholder="Father's Full Name" />
+            {renderBadge('father_name', extractedFather, 'PAN', panProcessing)}
+            {renderMismatchWarning('father_name', form.father_name, extractedFather, normStr, 'PAN')}
+          </div>
+
+          {/* Address */}
+          <div className="sm:col-span-2 lg:col-span-3">
+            <label className="block text-xs font-medium text-slate-700 mb-1">Address</label>
+            <textarea rows="2" className="input" value={form.address} onChange={e => handleChange('address', e.target.value)} placeholder="Full Postal Address" />
+            {renderBadge('address', extractedAddress, 'Aadhaar', aadhaarProcessing)}
+            {renderMismatchWarning('address', form.address, extractedAddress, normStr, 'Aadhaar')}
+          </div>
+        </div>
+
+        <div className="flex justify-end pt-2">
+          <button type="submit" disabled={saving} className="btn-primary px-6 py-2 flex items-center gap-2">
+            {saving ? <Loader className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />} Save Applicant Details
+          </button>
+        </div>
+      </form>
+    </Section>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function UploadPage() {
@@ -310,9 +588,15 @@ export default function UploadPage() {
   });
   const [savingSite, setSavingSite] = useState(false);
 
-  useEffect(() => { 
-    getApplications().then((r) => setApps(r.data)).catch(() => {}); 
+  const loadApps = useCallback(() => {
+    getApplications().then((r) => setApps(r.data)).catch(() => {});
   }, []);
+
+  useEffect(() => { 
+    loadApps(); 
+  }, [loadApps]);
+
+  const currentApp = apps.find(a => String(a.id) === String(applicationId));
 
   const loadDocuments = useCallback(() => {
     if (applicationId) {
@@ -431,6 +715,9 @@ export default function UploadPage() {
               })}
             </div>
           </div>
+
+          {/* Applicant Details Form */}
+          <ApplicantDetailsCard applicationId={applicationId} uploadedDocs={uploadedDocs} currentApp={currentApp} onSaved={loadApps} />
 
           {/* Applicant Documents */}
           <Section icon={User} title='Applicant Documents' color='blue'>

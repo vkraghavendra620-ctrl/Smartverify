@@ -68,5 +68,7 @@ export const submitPropertyDetails = (appId, data) => api.post(`/applications/${
 
 export const submitGovVerification = (appId, data) => api.post(`/applications/${appId}/gov_verification`, data);
 
+export const updateApplicantDetails = (appId, data) => api.put(`/applications/${appId}/applicant_details`, data);
+
 export default api;
 

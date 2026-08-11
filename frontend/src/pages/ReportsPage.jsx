@@ -118,7 +118,6 @@ export default function ReportsPage() {
 
             {isExpanded && (
               <div className='p-5 border-t border-slate-100 bg-slate-50/50 space-y-6'>
-                <GovVerification />
                 <div className='grid grid-cols-1 md:grid-cols-2 gap-6'>
                   <div className='card bg-white'>
                     <h3 className='font-semibold text-slate-800 mb-3 border-b pb-2'>Applicant Details</h3>

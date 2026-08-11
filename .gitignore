@@ -9,3 +9,8 @@ backend/uploads/
 backend/reports/
 *.log
 .vscode/
+
+backend/chroma_db/
+backend/__pycache__/
+frontend/node_modules/
+backend/smartverify.db

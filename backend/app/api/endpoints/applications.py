@@ -21,6 +21,12 @@ def create_application(
     app = Application(
         user_id=current_user.id,
         applicant_name=payload.applicant_name,
+        aadhaar_number=payload.aadhaar_number,
+        pan_number=payload.pan_number,
+        dob=payload.dob,
+        gender=payload.gender,
+        address=payload.address,
+        father_name=payload.father_name,
         branch=payload.branch,
         loan_type=payload.loan_type,
         loan_amount=payload.loan_amount,
@@ -41,7 +47,8 @@ def list_applications(
     """List applications (admins see all; officers see their own)."""
     if current_user.role == "admin":
         return db.query(Application).order_by(Application.created_at.desc()).all()
-    return db.query(Application).filter(Application.user_id == current_user.id)             .order_by(Application.created_at.desc()).all()
+    return db.query(Application).filter(Application.user_id == current_user.id)\
+            .order_by(Application.created_at.desc()).all()
 
 
 @router.get("/{app_id}", response_model=ApplicationOut)
@@ -55,6 +62,29 @@ def get_application(
         raise HTTPException(status_code=404, detail="Application not found")
     if current_user.role != "admin" and app.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
+    return app
+
+from app.schemas.application import ApplicantDetailsUpdate
+
+@router.put("/{app_id}/applicant_details", response_model=ApplicationOut)
+def update_applicant_details(
+    app_id: int,
+    payload: ApplicantDetailsUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update reviewed applicant details for an application."""
+    app = db.query(Application).filter(Application.id == app_id).first()
+    if not app:
+        raise HTTPException(status_code=404, detail="Application not found")
+    if current_user.role != "admin" and app.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(app, key, value)
+
+    db.commit()
+    db.refresh(app)
     return app
 
 

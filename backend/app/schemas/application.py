@@ -39,6 +39,21 @@ class ApplicationCreate(BaseModel):
     loan_tenure: Optional[int] = None
     interest_rate: Optional[float] = None
     applicant_name: Optional[str] = None
+    aadhaar_number: Optional[str] = None
+    pan_number: Optional[str] = None
+    dob: Optional[str] = None
+    gender: Optional[str] = None
+    address: Optional[str] = None
+    father_name: Optional[str] = None
+
+class ApplicantDetailsUpdate(BaseModel):
+    applicant_name: Optional[str] = None
+    aadhaar_number: Optional[str] = None
+    pan_number: Optional[str] = None
+    dob: Optional[str] = None
+    gender: Optional[str] = None
+    address: Optional[str] = None
+    father_name: Optional[str] = None
 
 class JointApplicantCreate(BaseModel):
     index: int
@@ -123,6 +138,12 @@ class ApplicationOut(BaseModel):
     id: int
     user_id: int
     applicant_name: Optional[str]
+    aadhaar_number: Optional[str] = None
+    pan_number: Optional[str] = None
+    dob: Optional[str] = None
+    gender: Optional[str] = None
+    address: Optional[str] = None
+    father_name: Optional[str] = None
     branch: Optional[str]
     loan_type: Optional[str]
     loan_amount: float

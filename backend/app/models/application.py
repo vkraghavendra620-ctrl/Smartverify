@@ -17,12 +17,19 @@ class Application(Base):
     user_id        = Column(Integer, ForeignKey("users.id"), nullable=False)
     applicant_name = Column(String(255))
     
-    # New loan details
     branch         = Column(String(255), nullable=True)
     loan_type      = Column(String(255), nullable=True)
     loan_amount    = Column(Float, nullable=False)
     loan_tenure    = Column(Integer, nullable=True)
     interest_rate  = Column(Float, nullable=True)
+
+    # Applicant persistent fields
+    aadhaar_number = Column(String(20), nullable=True)
+    pan_number     = Column(String(20), nullable=True)
+    dob            = Column(String(50), nullable=True)
+    gender         = Column(String(50), nullable=True)
+    address        = Column(String(500), nullable=True)
+    father_name    = Column(String(255), nullable=True)
     
     status         = Column(SAEnum(ApplicationStatus), default=ApplicationStatus.pending)
     created_at     = Column(DateTime, default=datetime.utcnow)

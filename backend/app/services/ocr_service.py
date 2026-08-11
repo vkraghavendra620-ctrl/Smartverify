@@ -1,10 +1,9 @@
 """
 OCR Service
-Extracts text from images and PDFs using EasyOCR and Tesseract.
+Extracts text from images and PDFs using EasyOCR (line-by-line mode) with Tesseract fallback.
 """
 import logging, os
 from pathlib import Path
-import pytesseract
 from PIL import Image
 
 logger = logging.getLogger(__name__)
@@ -25,28 +24,29 @@ def _get_easyocr():
 
 
 def extract_text_from_image(image_path: str) -> str:
-    """Extract text using EasyOCR with Tesseract fallback."""
+    """Extract text line-by-line using EasyOCR with Tesseract fallback."""
     text = ""
 
-    # Primary: EasyOCR
+    # Primary: EasyOCR in line-by-line mode (paragraph=False preserves layout lines)
     try:
         reader = _get_easyocr()
         if reader:
-            results = reader.readtext(image_path, detail=0, paragraph=True)
-            text = " ".join(results)
+            results = reader.readtext(image_path, detail=0, paragraph=False)
+            text = "\n".join(results)
             if text.strip():
-                logger.info(f"EasyOCR extracted {len(text)} chars from {image_path}")
+                logger.info(f"EasyOCR extracted {len(results)} lines ({len(text)} chars) from {image_path}")
                 return text.strip()
     except Exception as e:
         logger.warning(f"EasyOCR failed: {e}")
 
     # Fallback: Tesseract
     try:
+        import pytesseract
         img = Image.open(image_path)
-        text = pytesseract.image_to_string(img, lang="eng+hin")
+        text = pytesseract.image_to_string(img, lang="eng")
         logger.info(f"Tesseract extracted {len(text)} chars from {image_path}")
     except Exception as e:
-        logger.error(f"Tesseract also failed: {e}")
+        logger.error(f"Tesseract unavailable/failed: {e}")
 
     return text.strip()
 
@@ -65,7 +65,6 @@ def extract_text_from_pdf(pdf_path: str) -> str:
         return "\n".join(texts)
     except Exception as e:
         logger.error(f"PDF text extraction failed: {e}")
-        # Try direct pdfplumber extraction
         try:
             import pdfplumber
             with pdfplumber.open(pdf_path) as pdf:
