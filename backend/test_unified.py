@@ -24,9 +24,12 @@ assert r.status_code == 200 and r.json() == {'status': 'healthy'}, f'Health fail
 print('PASS 4: GET /health')
 
 # 5. Static JS
-r = client.get('/static/js/main.155833fd.js')
+import glob, os
+js_files = glob.glob('frontend/build/static/js/main.*.js')
+js_file = os.path.basename(js_files[0]) if js_files else 'main.c82657d7.js'
+r = client.get(f'/static/js/{js_file}')
 assert r.status_code == 200, f'Static JS failed: {r.status_code}'
-print('PASS 5: GET /static/js/... (200 OK)')
+print(f'PASS 5: GET /static/js/{js_file} (200 OK)')
 
 # 6. Swagger docs
 r = client.get('/api/docs')

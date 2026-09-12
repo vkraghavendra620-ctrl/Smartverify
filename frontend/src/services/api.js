@@ -42,6 +42,7 @@ export const uploadDocument  = (formData) =>
   api.post("/documents/upload", formData, { headers: { "Content-Type": "multipart/form-data" } });
 export const processDocument = (docId)   => api.post(`/documents/process/${docId}`);
 export const getDocuments    = (appId)   => api.get(`/documents/${appId}`);
+export const deleteDocument  = (docId)   => api.delete(`/documents/${docId}`);
 
 // ── Verification ───────────────────────────────────────────────────────────
 export const runVerification = (appId) => api.post(`/verify/${appId}`);

@@ -12,7 +12,7 @@ from app.schemas.document import DocumentOut
 from app.core.security import get_current_user
 from app.core.config import settings
 from app.services.preprocessing import preprocess_image
-from app.services.ocr_service import extract_text
+from app.services.ocr_service import extract_text, run_multipass_ocr
 from app.services.nlp_service import extract_information
 from app.services.classification_service import classify_document
 
@@ -103,21 +103,31 @@ async def process_document(
     doc.processed = 1
     db.commit()
 
-    # OCR and NLP Extraction
+    # OCR and NLP Extraction via Multi-Pass Pipeline
     try:
-        text = extract_text(preprocessed_path)
-        doc.extracted_text = text
-        
-        # Run NLP extraction on the OCR text
-        structured_data = extract_information(text, doc_type=doc.document_type.value)
+        # 1. Run multi-pass OCR workflow with image quality analysis
+        multipass_result = run_multipass_ocr(doc.file_path, doc_type=doc.document_type.value)
+        doc.extracted_text = multipass_result.get("primary_text", "")
+
+        # 2. Multi-pass consensus and field-level confidence extraction
+        structured_data = extract_information(multipass_result, doc_type=doc.document_type.value)
         doc.structured_data = json.dumps(structured_data)
-        
+
         doc.processed = 2
         db.commit()
-        logger.info(f"OCR and NLP complete for document {document_id}: {len(text)} chars")
+        logger.info(f"Multi-pass OCR complete for document {document_id}: {len(doc.extracted_text)} chars")
     except Exception as e:
-        logger.error(f"OCR/NLP failed for {document_id}: {e}")
-        raise HTTPException(status_code=500, detail="Document processing failed")
+        logger.warning(f"Multi-pass OCR pipeline exception for {document_id}: {e}. Falling back to standard OCR.")
+        try:
+            text = extract_text(preprocessed_path)
+            doc.extracted_text = text
+            structured_data = extract_information(text, doc_type=doc.document_type.value)
+            doc.structured_data = json.dumps(structured_data)
+            doc.processed = 2
+            db.commit()
+        except Exception as e2:
+            logger.error(f"Fallback OCR also failed for {document_id}: {e2}")
+            raise HTTPException(status_code=500, detail="Document processing failed")
 
     db.refresh(doc)
     return doc
@@ -130,3 +140,30 @@ def list_documents(
     current_user: User = Depends(get_current_user),
 ):
     return db.query(Document).filter(Document.application_id == application_id).all()
+
+
+@router.delete("/{document_id}", status_code=200)
+def delete_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a document by id and clean up stored file."""
+    doc = db.query(Document).filter(Document.id == document_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    app = db.query(Application).filter(Application.id == doc.application_id).first()
+    if app and current_user.role != "admin" and app.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if doc.file_path and os.path.exists(doc.file_path):
+        try:
+            os.remove(doc.file_path)
+        except Exception as e:
+            logger.warning(f"Could not remove file {doc.file_path}: {e}")
+
+    db.delete(doc)
+    db.commit()
+    logger.info(f"Document {document_id} deleted successfully")
+    return {"status": "deleted", "id": document_id}

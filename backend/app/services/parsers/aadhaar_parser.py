@@ -4,7 +4,7 @@ Extracts structured metadata (value, confidence, source, extraction_method, vali
 from raw OCR text lines for Aadhaar cards.
 """
 import re
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List, Tuple
 
 STOP_WORDS = {
     'government', 'india', 'unique', 'identification', 'authority', 'aadhaar', 
@@ -14,6 +14,117 @@ STOP_WORDS = {
     'mother', 'husband', 'wife', 'son', 'daughter', 'order', 'state', 'pincode', 'pin',
     'vid', 'www', 'uidai', 'gov', 'in', 'mera', 'pehechan', 'aadhar'
 }
+
+# Verhoeff algorithm tables for UIDAI checksum validation
+_VERHOEFF_D = [
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+    [1, 2, 3, 4, 0, 6, 7, 8, 9, 5],
+    [2, 3, 4, 0, 1, 7, 8, 9, 5, 6],
+    [3, 4, 0, 1, 2, 8, 9, 5, 6, 7],
+    [4, 0, 1, 2, 3, 9, 5, 6, 7, 8],
+    [5, 9, 8, 7, 6, 0, 4, 3, 2, 1],
+    [6, 5, 9, 8, 7, 1, 0, 4, 3, 2],
+    [7, 6, 5, 9, 8, 2, 1, 0, 4, 3],
+    [8, 7, 6, 5, 9, 3, 2, 1, 0, 4],
+    [9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
+]
+_VERHOEFF_P = [
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+    [1, 5, 7, 6, 2, 8, 3, 0, 9, 4],
+    [5, 8, 0, 3, 7, 9, 6, 1, 4, 2],
+    [8, 9, 1, 6, 0, 4, 3, 5, 2, 7],
+    [9, 4, 5, 3, 1, 2, 6, 8, 7, 0],
+    [4, 2, 8, 6, 5, 7, 3, 9, 0, 1],
+    [2, 7, 9, 3, 8, 0, 6, 4, 1, 5],
+    [7, 0, 4, 6, 9, 1, 3, 2, 5, 8]
+]
+
+def validate_verhoeff(num_str: str) -> bool:
+    """Validate 12-digit Aadhaar number using official Verhoeff checksum algorithm."""
+    if not num_str or not num_str.isdigit() or len(num_str) != 12:
+        return False
+    c = 0
+    for i, item in enumerate(reversed(num_str)):
+        c = _VERHOEFF_D[c][_VERHOEFF_P[i % 8][int(item)]]
+    return c == 0
+
+def mask_aadhaar(num_str: Optional[str]) -> str:
+    """Mask Aadhaar number for secure logging: XXXX-XXXX-1234."""
+    if not num_str:
+        return ""
+    clean = re.sub(r"\D", "", num_str)
+    if len(clean) == 12:
+        return f"XXXX-XXXX-{clean[-4:]}"
+    return "XXXX-XXXX-XXXX"
+
+def extract_aadhaar_candidates(text: str):
+    """
+    Extract 12-digit Aadhaar candidates from text using pattern matching
+    and character confusion correction.
+    """
+    candidates = []
+    seen = set()
+
+    # 1. Standard 4-4-4 pattern or 12 continuous digits
+    patterns = [
+        r"\b(\d{4}[\s-]\d{4}[\s-]\d{4})\b",
+        r"\b(\d{12})\b",
+    ]
+    for pat in patterns:
+        for m in re.finditer(pat, text):
+            raw = m.group(1)
+            clean = re.sub(r"[\s-]", "", raw)
+            if len(clean) == 12 and clean not in seen:
+                is_vh = validate_verhoeff(clean)
+                score = 90 + (10 if is_vh else 0)
+                conf = 0.99 if is_vh else 0.95
+                candidates.append({
+                    "aadhaar": clean,
+                    "confidence": conf,
+                    "score": score,
+                    "is_verhoeff": is_vh,
+                    "corrections": 0,
+                    "raw_match": raw,
+                    "method": "strict_regex"
+                })
+                seen.add(clean)
+
+    # 2. Glitch-tolerant extraction (e.g. O/0, I/1 in 4-digit groups)
+    glitch_pat = r"\b([0-9OlIPSBZgbq]{4}[\s-][0-9OlIPSBZgbq]{4}[\s-][0-9OlIPSBZgbq]{4})\b"
+    char_map = {'O': '0', 'o': '0', 'I': '1', 'l': '1', '|': '1', 'P': '0', 'S': '5', 's': '5', 'B': '8', 'Z': '2', 'z': '2', 'b': '6', 'q': '9', 'g': '9'}
+    for m in re.finditer(glitch_pat, text):
+        raw = m.group(1)
+        cleaned_chars = []
+        corrs = 0
+        for ch in raw:
+            if ch in (' ', '-'):
+                continue
+            if ch.isdigit():
+                cleaned_chars.append(ch)
+            elif ch in char_map:
+                cleaned_chars.append(char_map[ch])
+                corrs += 1
+            else:
+                break
+        if len(cleaned_chars) == 12 and corrs > 0 and corrs <= 2:
+            clean = "".join(cleaned_chars)
+            if clean not in seen:
+                is_vh = validate_verhoeff(clean)
+                score = 75 + (15 if is_vh else 0) - (corrs * 10)
+                conf = 0.94 if is_vh else 0.85
+                candidates.append({
+                    "aadhaar": clean,
+                    "confidence": conf,
+                    "score": score,
+                    "is_verhoeff": is_vh,
+                    "corrections": corrs,
+                    "raw_match": raw,
+                    "method": "glitch_corrected_regex"
+                })
+                seen.add(clean)
+
+    candidates.sort(key=lambda x: (x["score"], x["confidence"]), reverse=True)
+    return candidates
 
 def parse_aadhaar(text: str) -> Dict[str, Any]:
     """Parse Aadhaar card OCR text and return structured metadata per field."""
@@ -32,19 +143,27 @@ def parse_aadhaar(text: str) -> Dict[str, Any]:
     lines = [l.strip() for l in text.split('\n') if l.strip()]
 
     # 1. Aadhaar Number (12 digits)
-    aadhaar_match = re.search(r"\b(\d{4}[\s-]?\d{4}[\s-]?\d{4})\b", text)
-    if aadhaar_match:
-        raw_val = aadhaar_match.group(1)
-        clean_num = re.sub(r"[\s-]", "", raw_val)
-        if len(clean_num) == 12:
-            results["aadhaar_number"] = _build_field(
-                value=clean_num,
-                confidence=0.99,
-                source="aadhaar",
-                method="regex_pattern_matcher",
-                status="valid",
-                evidence=raw_val
-            )
+    candidates = extract_aadhaar_candidates(text)
+    if candidates:
+        best = candidates[0]
+        results["aadhaar_number"] = _build_field(
+            value=best["aadhaar"],
+            confidence=best["confidence"],
+            source="aadhaar",
+            method=best["method"],
+            status="valid" if best["confidence"] >= 0.75 else "needs_review",
+            evidence=best["raw_match"]
+        )
+    else:
+        results["aadhaar_number"] = _build_field(
+            value=None,
+            confidence=0.0,
+            source="aadhaar",
+            method="no_candidate",
+            status="low_confidence",
+            warning="Aadhaar number could not be extracted confidently. Please upload a clearer image."
+        )
+
 
 
     # 2. DOB (Date of Birth / Year of Birth) - Glitch-tolerant
@@ -247,15 +366,210 @@ def parse_aadhaar(text: str) -> Dict[str, Any]:
     return results
 
 
-def _build_field(value: Optional[str], confidence: float, source: str, method: str, status: str, evidence: Optional[str] = None) -> Dict[str, Any]:
+def parse_aadhaar_multipass(passes: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Parse Aadhaar card using multi-pass OCR consensus.
+    Aggregates candidates across passes, validates 12-digit format and Verhoeff checksum,
+    and assigns field-level confidence ratings.
+    """
+    if not passes:
+        return parse_aadhaar("")
+
+    if len(passes) == 1:
+        return parse_aadhaar(passes[0].get("text", ""))
+
+    aadhaar_cand_map: Dict[str, Dict[str, Any]] = {}
+    name_cands: Dict[str, float] = {}
+    father_cands: Dict[str, float] = {}
+    dob_cands: Dict[str, float] = {}
+    gender_cands: Dict[str, float] = {}
+    address_cands: Dict[str, float] = {}
+
+    for p in passes:
+        text = p.get("text", "")
+        detections = p.get("detections", [])
+
+        cands = extract_aadhaar_candidates(text)
+        for c in cands:
+            num = c["aadhaar"]
+            if num not in aadhaar_cand_map:
+                aadhaar_cand_map[num] = {
+                    "count": 0,
+                    "confidences": [],
+                    "is_verhoeff": c["is_verhoeff"],
+                    "corrections": c["corrections"],
+                    "raw_matches": [],
+                    "scores": []
+                }
+            aadhaar_cand_map[num]["count"] += 1
+            aadhaar_cand_map[num]["confidences"].append(c["confidence"])
+            aadhaar_cand_map[num]["raw_matches"].append(c["raw_match"])
+            aadhaar_cand_map[num]["scores"].append(c["score"])
+
+        # Field parsing per pass
+        single_res = parse_aadhaar(text)
+        if single_res["applicant_name"]["value"]:
+            nm = single_res["applicant_name"]["value"]
+            name_cands[nm] = name_cands.get(nm, 0.0) + single_res["applicant_name"]["confidence"]
+        if single_res["father_name"]["value"]:
+            fn = single_res["father_name"]["value"]
+            father_cands[fn] = father_cands.get(fn, 0.0) + single_res["father_name"]["confidence"]
+        if single_res["dob"]["value"]:
+            db = single_res["dob"]["value"]
+            dob_cands[db] = dob_cands.get(db, 0.0) + single_res["dob"]["confidence"]
+        if single_res["gender"]["value"]:
+            gn = single_res["gender"]["value"]
+            gender_cands[gn] = gender_cands.get(gn, 0.0) + single_res["gender"]["confidence"]
+        if single_res["address"]["value"]:
+            ad = single_res["address"]["value"]
+            address_cands[ad] = address_cands.get(ad, 0.0) + single_res["address"]["confidence"]
+
+    results = {
+        "aadhaar_number": _build_field(None, 0.0, "aadhaar", "none", "not_found"),
+        "applicant_name": _build_field(None, 0.0, "aadhaar", "none", "not_found"),
+        "father_name":    _build_field(None, 0.0, "aadhaar", "none", "not_found"),
+        "dob":            _build_field(None, 0.0, "aadhaar", "none", "not_found"),
+        "gender":         _build_field(None, 0.0, "aadhaar", "none", "not_found"),
+        "address":        _build_field(None, 0.0, "aadhaar", "none", "not_found"),
+    }
+
+    # Decide Aadhaar Number winner
+    if aadhaar_cand_map:
+        scored_nums = []
+        for num, meta in aadhaar_cand_map.items():
+            base_conf = sum(meta["confidences"]) / len(meta["confidences"])
+            consensus_bonus = 0.12 if meta["count"] >= 2 else 0.0
+            vh_bonus = 0.10 if meta["is_verhoeff"] else 0.0
+            final_conf = min(0.99, max(0.20, base_conf + consensus_bonus + vh_bonus))
+            composite_score = max(meta["scores"]) + (meta["count"] * 25)
+            scored_nums.append((num, final_conf, composite_score, meta))
+
+        scored_nums.sort(key=lambda x: (x[1] >= 0.75, x[2], x[1]), reverse=True)
+        best_num, best_conf, best_score, best_meta = scored_nums[0]
+
+        if best_conf >= 0.75 and len(best_num) == 12:
+            results["aadhaar_number"] = _build_field(
+                value=best_num,
+                confidence=best_conf,
+                source="aadhaar",
+                method=f"multi_pass_consensus_{best_meta['count']}_passes",
+                status="valid",
+                evidence=", ".join(set(best_meta["raw_matches"][:2]))
+            )
+        elif best_conf >= 0.60 and len(best_num) == 12:
+            results["aadhaar_number"] = _build_field(
+                value=best_num,
+                confidence=best_conf,
+                source="aadhaar",
+                method="multi_pass_low_confidence",
+                status="needs_review",
+                evidence=", ".join(set(best_meta["raw_matches"][:2])),
+                warning="Aadhaar number confidence is low. Please verify or upload a clearer image."
+            )
+        else:
+            results["aadhaar_number"] = _build_field(
+                value=None,
+                confidence=best_conf,
+                source="aadhaar",
+                method="failed_confidence_check",
+                status="low_confidence",
+                warning="Aadhaar number could not be extracted confidently. Please upload a clearer image."
+            )
+    else:
+        results["aadhaar_number"] = _build_field(
+            value=None,
+            confidence=0.0,
+            source="aadhaar",
+            method="no_candidate",
+            status="low_confidence",
+            warning="Aadhaar number could not be extracted confidently. Please upload a clearer image."
+        )
+
+    # Name winner
+    if name_cands:
+        best_name = sorted(name_cands.items(), key=lambda x: x[1], reverse=True)[0][0]
+        name_conf = min(0.98, 0.85 + (0.10 if len(passes) > 1 and name_cands[best_name] > 1.0 else 0.0))
+        results["applicant_name"] = _build_field(
+            value=best_name,
+            confidence=name_conf,
+            source="aadhaar",
+            method="multi_pass_name_consensus",
+            status="valid",
+            evidence=best_name
+        )
+
+    # Father Name winner
+    if father_cands:
+        best_father = sorted(father_cands.items(), key=lambda x: x[1], reverse=True)[0][0]
+        results["father_name"] = _build_field(
+            value=best_father,
+            confidence=0.92,
+            source="aadhaar",
+            method="multi_pass_father_consensus",
+            status="valid",
+            evidence=best_father
+        )
+
+    # DOB winner
+    if dob_cands:
+        best_dob = sorted(dob_cands.items(), key=lambda x: x[1], reverse=True)[0][0]
+        results["dob"] = _build_field(
+            value=best_dob,
+            confidence=0.98,
+            source="aadhaar",
+            method="multi_pass_dob_consensus",
+            status="valid",
+            evidence=best_dob
+        )
+
+    # Gender winner
+    if gender_cands:
+        best_gender = sorted(gender_cands.items(), key=lambda x: x[1], reverse=True)[0][0]
+        results["gender"] = _build_field(
+            value=best_gender,
+            confidence=0.96,
+            source="aadhaar",
+            method="multi_pass_gender_consensus",
+            status="valid",
+            evidence=best_gender
+        )
+
+    # Address winner
+    if address_cands:
+        best_addr = sorted(address_cands.items(), key=lambda x: x[1], reverse=True)[0][0]
+        results["address"] = _build_field(
+            value=best_addr,
+            confidence=0.92,
+            source="aadhaar",
+            method="multi_pass_address_consensus",
+            status="valid",
+            evidence=best_addr
+        )
+
+    return results
+
+
+def _build_field(
+    value: Optional[str],
+    confidence: float,
+    source: str,
+    method: str,
+    status: str,
+    evidence: Optional[str] = None,
+    warning: Optional[str] = None
+) -> Dict[str, Any]:
+    conf_level = "high" if (confidence >= 0.75 and status == "valid" and value) else "low"
     return {
         "value": value,
-        "confidence": confidence,
+        "confidence": round(float(confidence), 2),
+        "confidence_level": conf_level,
         "source_document": source,
         "extraction_method": method,
         "validation_status": status,
-        "raw_match": evidence
+        "raw_match": evidence,
+        "warning": warning
     }
+
 
 
 def _clean_ocr_name(val: str) -> str:

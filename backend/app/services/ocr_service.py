@@ -1,4 +1,4 @@
-﻿"""
+"""
 OCR Service
 Robust multi-tier OCR engine with automatic orientation correction:
 1. Google Cloud Vision REST API (if GOOGLE_VISION_API_KEY is configured)
@@ -10,7 +10,7 @@ import base64
 import logging
 import os
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict, Any, Tuple
 
 import httpx
 import cv2
@@ -52,6 +52,41 @@ def _extract_with_easyocr(image_input) -> str:
     except Exception as e:
         logger.warning(f"EasyOCR extraction failed: {e}")
         return ""
+
+
+def _extract_detailed_easyocr(image_input):
+    """
+    Run EasyOCR with full details: bounding boxes, recognized text, and token confidences.
+    Returns (full_text, detections_list, avg_confidence).
+    """
+    reader = _get_easyocr()
+    if not reader:
+        return "", [], 0.0
+    try:
+        raw_results = reader.readtext(image_input, detail=1, paragraph=False)
+        detections = []
+        texts = []
+        confs = []
+        for item in raw_results:
+            if not item or len(item) < 3:
+                continue
+            bbox, text, prob = item[0], item[1], item[2]
+            clean_t = str(text).strip()
+            if clean_t:
+                texts.append(clean_t)
+                confs.append(float(prob))
+                bbox_list = [[float(pt[0]), float(pt[1])] for pt in bbox] if bbox is not None else []
+                detections.append({
+                    "bbox": bbox_list,
+                    "text": clean_t,
+                    "confidence": float(prob)
+                })
+        full_text = "\n".join(texts).strip()
+        avg_conf = float(sum(confs) / len(confs)) if confs else 0.0
+        return full_text, detections, avg_conf
+    except Exception as e:
+        logger.warning(f"Detailed EasyOCR extraction failed: {e}")
+        return "", [], 0.0
 
 
 # -------------------------------------------------------------------------
@@ -291,3 +326,122 @@ def extract_text(file_path: str) -> str:
         return extract_text_from_pdf(file_path)
     else:
         return extract_text_from_image(file_path)
+
+
+def run_multipass_ocr(image_path: str, doc_type: str = "generic") -> Dict[str, Any]:
+    """
+    Execute multi-pass OCR workflow:
+    1. Image quality assessment (blur, resolution, lighting, noise, tilt)
+    2. Adaptive preprocessing variants generation
+    3. Multi-pass OCR execution with spatial and confidence details
+    4. Return full passes report for consensus parsing
+    """
+    from app.services.preprocessing import assess_image_quality, generate_preprocessing_variants
+
+    # If PDF, extract first page to image or fallback to single text
+    ext = Path(image_path).suffix.lower()
+    if ext == ".pdf":
+        text = extract_text_from_pdf(image_path)
+        return {
+            "quality": {"quality_score": 90, "issues": [], "warning": None},
+            "passes": [{"variant": "pdf_direct", "text": text, "detections": [], "confidence": 0.95, "score": _score_text(text)}],
+            "primary_text": text,
+            "all_texts": [text] if text else []
+        }
+
+    quality_report = assess_image_quality(image_path)
+    issues = quality_report.get("issues", [])
+    variants = generate_preprocessing_variants(image_path, quality_report)
+
+    if not variants:
+        raw_text = extract_text_from_image(image_path)
+        return {
+            "quality": quality_report,
+            "passes": [{"variant": "fallback", "text": raw_text, "detections": [], "confidence": 0.7, "score": _score_text(raw_text)}],
+            "primary_text": raw_text,
+            "all_texts": [raw_text] if raw_text else []
+        }
+
+    # Select variants according to detected issues
+    pass_keys = []
+    if "enhanced" in variants:
+        pass_keys.append("enhanced")
+
+    if "excessive_blur" in issues or "slight_blur" in issues:
+        if "sharpened" in variants and "sharpened" not in pass_keys:
+            pass_keys.append("sharpened")
+
+    if "very_low_resolution" in issues or "low_resolution" in issues:
+        if "upscaled" in variants and "upscaled" not in pass_keys:
+            pass_keys.append("upscaled")
+
+    if any(k in issues for k in ["underexposed_dark", "overexposed_bright", "uneven_lighting", "poor_contrast"]):
+        if "thresholded" in variants and "thresholded" not in pass_keys:
+            pass_keys.append("thresholded")
+
+    if "document_tilt" in issues:
+        if "deskewed" in variants and "deskewed" not in pass_keys:
+            pass_keys.append("deskewed")
+
+    # Ensure at least 2 distinct passes for consensus
+    fallback_variants = ["original", "sharpened", "thresholded", "upscaled"]
+    for fb in fallback_variants:
+        if len(pass_keys) >= 3:
+            break
+        if fb in variants and fb not in pass_keys:
+            pass_keys.append(fb)
+
+    # Maximum 3 passes for optimal accuracy vs interactive speed
+    pass_keys = pass_keys[:3]
+    logger.info(f"Running multi-pass OCR on {Path(image_path).name} with variants: {pass_keys}")
+
+    passes = []
+    for key in pass_keys:
+        img_var = variants[key]
+        p_text, p_dets, p_conf = _extract_detailed_easyocr(img_var)
+
+        # Orientation check on first pass if score is poor
+        if len(passes) == 0 and _score_text(p_text) < 15:
+            best_rot_text = p_text
+            best_rot_dets = p_dets
+            best_rot_conf = p_conf
+            best_score = _score_text(p_text)
+            rotations = [
+                (90, cv2.ROTATE_90_CLOCKWISE),
+                (180, cv2.ROTATE_180),
+                (270, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            ]
+            for angle, rot_flag in rotations:
+                try:
+                    rot_img = cv2.rotate(img_var, rot_flag)
+                    r_text, r_dets, r_conf = _extract_detailed_easyocr(rot_img)
+                    r_score = _score_text(r_text)
+                    if r_score > best_score:
+                        best_score = r_score
+                        best_rot_text = r_text
+                        best_rot_dets = r_dets
+                        best_rot_conf = r_conf
+                except Exception:
+                    pass
+            p_text = best_rot_text
+            p_dets = best_rot_dets
+            p_conf = best_rot_conf
+
+        passes.append({
+            "variant": key,
+            "text": p_text,
+            "detections": p_dets,
+            "confidence": p_conf,
+            "score": _score_text(p_text)
+        })
+
+    # Sort passes by information score & confidence
+    passes.sort(key=lambda x: (x["score"], x["confidence"]), reverse=True)
+    primary_text = passes[0]["text"] if passes else ""
+
+    return {
+        "quality": quality_report,
+        "passes": passes,
+        "primary_text": primary_text,
+        "all_texts": [p["text"] for p in passes if p["text"]]
+    }
