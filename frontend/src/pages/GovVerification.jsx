@@ -408,13 +408,11 @@ export default function GovVerificationPage() {
 
   // Aadhaar-specific extracted fields & confidence
   const [aadhaarName,           setAadhaarName]           = useState('');
-  const [aadhaarDob,            setAadhaarDob]            = useState('');
   const [aadhaarOcrText,        setAadhaarOcrText]        = useState('');
   const [aadhaarNameConfidence, setAadhaarNameConfidence] = useState(null);
 
   // PAN-specific extracted fields & confidence
   const [panName,               setPanName]               = useState('');
-  const [panDob,                setPanDob]                = useState('');
   const [panOcrText,            setPanOcrText]            = useState('');
   const [panNameConfidence,     setPanNameConfidence]     = useState(null);
 
@@ -470,7 +468,6 @@ export default function GovVerificationPage() {
         setAadhaarNumber('');
         setAadhaarSource('none');
         setAadhaarName('');
-        setAadhaarDob('');
         setAadhaarOcrText('');
         setAadhaarNameConfidence(null);
         setAadhaarQualityWarning(null);
@@ -481,7 +478,6 @@ export default function GovVerificationPage() {
         if (cached.aadhaarNumber !== undefined) setAadhaarNumber(cached.aadhaarNumber);
         if (cached.aadhaarSource !== undefined) setAadhaarSource(cached.aadhaarSource);
         if (cached.aadhaarName !== undefined) setAadhaarName(cached.aadhaarName);
-        if (cached.aadhaarDob !== undefined) setAadhaarDob(cached.aadhaarDob);
         if (cached.aadhaarOcrText !== undefined) setAadhaarOcrText(cached.aadhaarOcrText);
         if (cached.aadhaarNameConfidence !== undefined) setAadhaarNameConfidence(cached.aadhaarNameConfidence);
         setAadhaarQualityWarning(cached.aadhaarQualityWarning || null);
@@ -494,7 +490,6 @@ export default function GovVerificationPage() {
         setPanNumber('');
         setPanSource('none');
         setPanName('');
-        setPanDob('');
         setPanOcrText('');
         setPanNameConfidence(null);
         setPanQualityWarning(null);
@@ -505,7 +500,6 @@ export default function GovVerificationPage() {
         if (cached.panNumber !== undefined) setPanNumber(cached.panNumber);
         if (cached.panSource !== undefined) setPanSource(cached.panSource);
         if (cached.panName !== undefined) setPanName(cached.panName);
-        if (cached.panDob !== undefined) setPanDob(cached.panDob);
         if (cached.panOcrText !== undefined) setPanOcrText(cached.panOcrText);
         if (cached.panNameConfidence !== undefined) setPanNameConfidence(cached.panNameConfidence);
         setPanQualityWarning(cached.panQualityWarning || null);
@@ -555,7 +549,6 @@ export default function GovVerificationPage() {
         let newAadhaarNum = '';
         let newAadhaarSource = 'none';
         let newAadhaarName = '';
-        let newAadhaarDob = '';
         let newAadhaarOcrText = '';
         let newAadhaarNameConf = null;
         let aadhaarQualWarn = null;
@@ -607,12 +600,6 @@ export default function GovVerificationPage() {
                 newAadhaarName = sd.applicant_name;
                 newAadhaarNameConf = 'high';
               }
-
-              if (sd.fields?.dob) {
-                newAadhaarDob = sd.fields.dob.value || '';
-              } else if (sd.dob) {
-                newAadhaarDob = sd.dob;
-              }
             } catch (e) {}
           }
         } else {
@@ -624,7 +611,6 @@ export default function GovVerificationPage() {
         let newPanNum = '';
         let newPanSource = 'none';
         let newPanName = '';
-        let newPanDob = '';
         let newPanOcrText = '';
         let newPanNameConf = null;
         let panQualWarn = null;
@@ -676,12 +662,6 @@ export default function GovVerificationPage() {
                 newPanName = sd.applicant_name;
                 newPanNameConf = 'high';
               }
-
-              if (sd.fields?.dob) {
-                newPanDob = sd.fields.dob.value || '';
-              } else if (sd.dob) {
-                newPanDob = sd.dob;
-              }
             } catch (e) {}
           }
         } else {
@@ -716,7 +696,6 @@ export default function GovVerificationPage() {
         setAadhaarNumber(newAadhaarNum);
         setAadhaarSource(newAadhaarSource);
         setAadhaarName(newAadhaarName);
-        setAadhaarDob(newAadhaarDob);
         setAadhaarOcrText(newAadhaarOcrText);
         setAadhaarNameConfidence(newAadhaarNameConf);
         setAadhaarQualityWarning(aadhaarQualWarn);
@@ -727,7 +706,6 @@ export default function GovVerificationPage() {
         setPanNumber(newPanNum);
         setPanSource(newPanSource);
         setPanName(newPanName);
-        setPanDob(newPanDob);
         setPanOcrText(newPanOcrText);
         setPanNameConfidence(newPanNameConf);
         setPanQualityWarning(panQualWarn);
@@ -748,8 +726,6 @@ export default function GovVerificationPage() {
           panNumber:         newPanNum,
           aadhaarName:       newAadhaarName,
           panName:           newPanName,
-          aadhaarDob:        newAadhaarDob,
-          panDob:            newPanDob,
           aadhaarOcrText:    newAadhaarOcrText,
           panOcrText:        newPanOcrText,
           aadhaarNameConfidence: newAadhaarNameConf,
@@ -835,7 +811,6 @@ export default function GovVerificationPage() {
       let newAadhaar = '';
       let newAadhaarSrc = 'none';
       let extractedName = '';
-      let extractedDob = '';
       let extractedOcrText = doc.extracted_text || '';
       let nameConf = null;
 
@@ -879,18 +854,11 @@ export default function GovVerificationPage() {
           extractedName = sd.applicant_name;
           nameConf = 'high';
         }
-
-        if (sd.fields?.dob) {
-          extractedDob = sd.fields.dob.value || '';
-        } else if (sd.dob) {
-          extractedDob = sd.dob;
-        }
       }
 
       setAadhaarNumber(newAadhaar);
       setAadhaarSource(newAadhaarSrc);
       setAadhaarName(extractedName);
-      setAadhaarDob(extractedDob);
       setAadhaarOcrText(extractedOcrText);
       setAadhaarNameConfidence(nameConf);
 
@@ -925,7 +893,6 @@ export default function GovVerificationPage() {
         aadhaarNumber: newAadhaar,
         aadhaarSource: newAadhaarSrc,
         aadhaarName: extractedName,
-        aadhaarDob: extractedDob,
         aadhaarOcrText: extractedOcrText,
         aadhaarNameConfidence: nameConf,
         applicantName: nextAppName,
@@ -961,7 +928,6 @@ export default function GovVerificationPage() {
     setAadhaarNumber('');
     setAadhaarSource('none');
     setAadhaarName('');
-    setAadhaarDob('');
     setAadhaarOcrText('');
     setAadhaarNameConfidence(null);
     setAadhaarQualityWarning(null);
@@ -995,7 +961,6 @@ export default function GovVerificationPage() {
       aadhaarNumber: '',
       aadhaarSource: 'none',
       aadhaarName: '',
-      aadhaarDob: '',
       aadhaarOcrText: '',
       aadhaarNameConfidence: null,
       aadhaarQualityWarning: null,
@@ -1071,7 +1036,6 @@ export default function GovVerificationPage() {
       let newPan = '';
       let newPanSrc = 'none';
       let extractedName = '';
-      let extractedDob = '';
       let extractedOcrText = doc.extracted_text || '';
       let nameConf = null;
 
@@ -1115,18 +1079,11 @@ export default function GovVerificationPage() {
           extractedName = sd.applicant_name;
           nameConf = 'high';
         }
-
-        if (sd.fields?.dob) {
-          extractedDob = sd.fields.dob.value || '';
-        } else if (sd.dob) {
-          extractedDob = sd.dob;
-        }
       }
 
       setPanNumber(newPan);
       setPanSource(newPanSrc);
       setPanName(extractedName);
-      setPanDob(extractedDob);
       setPanOcrText(extractedOcrText);
       setPanNameConfidence(nameConf);
 
@@ -1161,7 +1118,6 @@ export default function GovVerificationPage() {
         panNumber: newPan,
         panSource: newPanSrc,
         panName: extractedName,
-        panDob: extractedDob,
         panOcrText: extractedOcrText,
         panNameConfidence: nameConf,
         applicantName: nextAppName,
@@ -1197,7 +1153,6 @@ export default function GovVerificationPage() {
     setPanNumber('');
     setPanSource('none');
     setPanName('');
-    setPanDob('');
     setPanOcrText('');
     setPanNameConfidence(null);
     setPanQualityWarning(null);
@@ -1231,7 +1186,6 @@ export default function GovVerificationPage() {
       panNumber: '',
       panSource: 'none',
       panName: '',
-      panDob: '',
       panOcrText: '',
       panNameConfidence: null,
       panQualityWarning: null,
@@ -1393,7 +1347,7 @@ export default function GovVerificationPage() {
         <div className="px-6 py-6 space-y-5">
 
           {/* Extracted data (editable) */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-slate-50 border border-slate-100 p-4 rounded-xl">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 border border-slate-100 p-4 rounded-xl">
             <ExtractedField
               label="Applicant Name"
               value={applicantName}
@@ -1426,33 +1380,7 @@ export default function GovVerificationPage() {
               confidenceScore={aadhaarConfidenceScore}
               warningText={aadhaarFieldWarning}
             />
-            <ExtractedField
-              label="Date of Birth (DOB)"
-              value={aadhaarDob}
-              onChange={(val) => {
-                setAadhaarDob(val);
-                saveGovCache(selectedAppId, { aadhaarDob: val });
-              }}
-              source={aadhaarDob ? 'ocr' : 'none'}
-              loading={isExtractingAadhaar}
-              loadingText="Extracting DOB…"
-              missingText="DOB auto-extracted on upload"
-              placeholder="DOB (DD/MM/YYYY)"
-            />
           </div>
-
-          {/* Collapsible raw OCR text inspection */}
-          {aadhaarOcrText && (
-            <details className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-600 transition-all">
-              <summary className="font-semibold text-slate-700 cursor-pointer select-none flex items-center justify-between">
-                <span>View Extracted Aadhaar OCR Text</span>
-                <span className="text-[11px] font-normal text-slate-400">({aadhaarOcrText.length} characters)</span>
-              </summary>
-              <pre className="mt-2 p-2.5 bg-white border border-slate-200 rounded-lg text-[11px] font-mono whitespace-pre-wrap max-h-36 overflow-y-auto text-slate-700">
-                {aadhaarOcrText}
-              </pre>
-            </details>
-          )}
 
           {/* Image Quality Warning Alert */}
           {aadhaarQualityWarning && (
@@ -1549,7 +1477,7 @@ export default function GovVerificationPage() {
         <div className="px-6 py-6 space-y-5">
 
           {/* Extracted data (editable) */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-slate-50 border border-slate-100 p-4 rounded-xl">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 border border-slate-100 p-4 rounded-xl">
             <ExtractedField
               label="Applicant PAN Number"
               value={panNumber}
@@ -1584,33 +1512,7 @@ export default function GovVerificationPage() {
               confidenceScore={aadhaarConfidenceScore}
               warningText={aadhaarFieldWarning}
             />
-            <ExtractedField
-              label="PAN Date of Birth (DOB)"
-              value={panDob}
-              onChange={(val) => {
-                setPanDob(val);
-                saveGovCache(selectedAppId, { panDob: val });
-              }}
-              source={panDob ? 'ocr' : 'none'}
-              loading={isExtractingPan}
-              loadingText="Extracting DOB…"
-              missingText="DOB auto-extracted on upload"
-              placeholder="DOB (DD/MM/YYYY)"
-            />
           </div>
-
-          {/* Collapsible raw OCR text inspection */}
-          {panOcrText && (
-            <details className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-600 transition-all">
-              <summary className="font-semibold text-slate-700 cursor-pointer select-none flex items-center justify-between">
-                <span>View Extracted PAN OCR Text</span>
-                <span className="text-[11px] font-normal text-slate-400">({panOcrText.length} characters)</span>
-              </summary>
-              <pre className="mt-2 p-2.5 bg-white border border-slate-200 rounded-lg text-[11px] font-mono whitespace-pre-wrap max-h-36 overflow-y-auto text-slate-700">
-                {panOcrText}
-              </pre>
-            </details>
-          )}
 
           {/* Image Quality Warning Alert */}
           {panQualityWarning && (
