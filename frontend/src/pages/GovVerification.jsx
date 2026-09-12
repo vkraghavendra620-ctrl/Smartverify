@@ -15,7 +15,8 @@ import {
   getApplications,
   uploadDocument,
   processDocument,
-  deleteDocument
+  deleteDocument,
+  deleteDocumentsByType
 } from '../services/api';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -405,6 +406,18 @@ export default function GovVerificationPage() {
   const [aadhaarFieldWarning,    setAadhaarFieldWarning]    = useState(null);
   const [panFieldWarning,        setPanFieldWarning]        = useState(null);
 
+  // Aadhaar-specific extracted fields & confidence
+  const [aadhaarName,           setAadhaarName]           = useState('');
+  const [aadhaarDob,            setAadhaarDob]            = useState('');
+  const [aadhaarOcrText,        setAadhaarOcrText]        = useState('');
+  const [aadhaarNameConfidence, setAadhaarNameConfidence] = useState(null);
+
+  // PAN-specific extracted fields & confidence
+  const [panName,               setPanName]               = useState('');
+  const [panDob,                setPanDob]                = useState('');
+  const [panOcrText,            setPanOcrText]            = useState('');
+  const [panNameConfidence,     setPanNameConfidence]     = useState(null);
+
   // 1. Fetch applications list on mount
   useEffect(() => {
     getApplications()
@@ -443,32 +456,67 @@ export default function GovVerificationPage() {
     if (cached) {
       setData(prev => ({
         ...prev,
-        aadhaarStatus:     cached.aadhaarStatus || prev.aadhaarStatus,
-        panStatus:         cached.panStatus     || prev.panStatus,
+        aadhaarStatus:     cached.aadhaarRemoved ? 'Pending' : (cached.aadhaarStatus || prev.aadhaarStatus),
+        panStatus:         cached.panRemoved     ? 'Pending' : (cached.panStatus     || prev.panStatus),
         officerName:       cached.officerName   !== undefined ? cached.officerName   : prev.officerName,
         date:              cached.date          !== undefined ? cached.date          : prev.date,
         time:              cached.time          !== undefined ? cached.time          : prev.time,
         remarks:           cached.remarks       !== undefined ? cached.remarks       : prev.remarks,
-        aadhaarScreenshot: cached.aadhaarRemoved ? null : (cached.aadhaarScreenshot || prev.aadhaarScreenshot),
-        panScreenshot:     cached.panRemoved     ? null : (cached.panScreenshot     || prev.panScreenshot),
+        aadhaarScreenshot: cached.aadhaarRemoved ? null : (cached.aadhaarScreenshot || null),
+        panScreenshot:     cached.panRemoved     ? null : (cached.panScreenshot     || null),
       }));
 
-      if (!cached.panRemoved && cached.panNumber !== undefined) setPanNumber(cached.panNumber);
-      if (!cached.aadhaarRemoved && cached.aadhaarNumber !== undefined) setAadhaarNumber(cached.aadhaarNumber);
-      if (cached.applicantName !== undefined) setApplicantName(cached.applicantName);
-      if (!cached.panRemoved && cached.panSource) setPanSource(cached.panSource);
-      if (!cached.aadhaarRemoved && cached.aadhaarSource) setAadhaarSource(cached.aadhaarSource);
-      if (cached.nameSource) setNameSource(cached.nameSource);
+      if (cached.aadhaarRemoved) {
+        setAadhaarNumber('');
+        setAadhaarSource('none');
+        setAadhaarName('');
+        setAadhaarDob('');
+        setAadhaarOcrText('');
+        setAadhaarNameConfidence(null);
+        setAadhaarQualityWarning(null);
+        setAadhaarConfidenceLevel(null);
+        setAadhaarConfidenceScore(null);
+        setAadhaarFieldWarning(null);
+      } else {
+        if (cached.aadhaarNumber !== undefined) setAadhaarNumber(cached.aadhaarNumber);
+        if (cached.aadhaarSource !== undefined) setAadhaarSource(cached.aadhaarSource);
+        if (cached.aadhaarName !== undefined) setAadhaarName(cached.aadhaarName);
+        if (cached.aadhaarDob !== undefined) setAadhaarDob(cached.aadhaarDob);
+        if (cached.aadhaarOcrText !== undefined) setAadhaarOcrText(cached.aadhaarOcrText);
+        if (cached.aadhaarNameConfidence !== undefined) setAadhaarNameConfidence(cached.aadhaarNameConfidence);
+        setAadhaarQualityWarning(cached.aadhaarQualityWarning || null);
+        setAadhaarConfidenceLevel(cached.aadhaarConfidenceLevel || null);
+        setAadhaarConfidenceScore(cached.aadhaarConfidenceScore || null);
+        setAadhaarFieldWarning(cached.aadhaarFieldWarning || null);
+      }
 
-      setAadhaarQualityWarning(cached.aadhaarRemoved ? null : (cached.aadhaarQualityWarning || null));
-      setPanQualityWarning(cached.panRemoved ? null : (cached.panQualityWarning || null));
-      setAadhaarConfidenceLevel(cached.aadhaarRemoved ? null : (cached.aadhaarConfidenceLevel || null));
-      setPanConfidenceLevel(cached.panRemoved ? null : (cached.panConfidenceLevel || null));
-      setNameConfidenceLevel(cached.nameConfidenceLevel || null);
-      setAadhaarConfidenceScore(cached.aadhaarConfidenceScore || null);
-      setPanConfidenceScore(cached.panConfidenceScore || null);
-      setAadhaarFieldWarning(cached.aadhaarRemoved ? null : (cached.aadhaarFieldWarning || null));
-      setPanFieldWarning(cached.panRemoved ? null : (cached.panFieldWarning || null));
+      if (cached.panRemoved) {
+        setPanNumber('');
+        setPanSource('none');
+        setPanName('');
+        setPanDob('');
+        setPanOcrText('');
+        setPanNameConfidence(null);
+        setPanQualityWarning(null);
+        setPanConfidenceLevel(null);
+        setPanConfidenceScore(null);
+        setPanFieldWarning(null);
+      } else {
+        if (cached.panNumber !== undefined) setPanNumber(cached.panNumber);
+        if (cached.panSource !== undefined) setPanSource(cached.panSource);
+        if (cached.panName !== undefined) setPanName(cached.panName);
+        if (cached.panDob !== undefined) setPanDob(cached.panDob);
+        if (cached.panOcrText !== undefined) setPanOcrText(cached.panOcrText);
+        if (cached.panNameConfidence !== undefined) setPanNameConfidence(cached.panNameConfidence);
+        setPanQualityWarning(cached.panQualityWarning || null);
+        setPanConfidenceLevel(cached.panConfidenceLevel || null);
+        setPanConfidenceScore(cached.panConfidenceScore || null);
+        setPanFieldWarning(cached.panFieldWarning || null);
+      }
+
+      if (cached.applicantName !== undefined) setApplicantName(cached.applicantName);
+      if (cached.nameSource !== undefined) setNameSource(cached.nameSource);
+      if (cached.nameConfidenceLevel !== undefined) setNameConfidenceLevel(cached.nameConfidenceLevel);
     }
 
     // B. AUTHORITATIVE BACKEND SYNC (loads saved documents from SQLite database)
@@ -502,16 +550,18 @@ export default function GovVerificationPage() {
 
         const currentCache = loadGovCache(selectedAppId) || {};
 
-        let aadhaarScreenshotObj = currentCache.aadhaarScreenshot;
-        let newAadhaarNum = currentCache.aadhaarNumber;
-        let newAppName = currentCache.applicantName;
-        let newAadhaarSource = currentCache.aadhaarSource || 'none';
-        let newNameSource = currentCache.nameSource || 'none';
-
-        let aadhaarQualWarn = currentCache.aadhaarQualityWarning || null;
-        let aadhaarConfLvl  = currentCache.aadhaarConfidenceLevel || null;
-        let aadhaarConfScr  = currentCache.aadhaarConfidenceScore || null;
-        let aadhaarWarn     = currentCache.aadhaarFieldWarning || null;
+        // Aadhaar document processing
+        let aadhaarScreenshotObj = null;
+        let newAadhaarNum = '';
+        let newAadhaarSource = 'none';
+        let newAadhaarName = '';
+        let newAadhaarDob = '';
+        let newAadhaarOcrText = '';
+        let newAadhaarNameConf = null;
+        let aadhaarQualWarn = null;
+        let aadhaarConfLvl  = null;
+        let aadhaarConfScr  = null;
+        let aadhaarWarn     = null;
 
         if (latestAadhaar && !currentCache.aadhaarRemoved) {
           const fn = latestAadhaar.file_path.split(/[/\\]/).pop();
@@ -520,6 +570,8 @@ export default function GovVerificationPage() {
             url: `/uploads/${fn}`,
             name: latestAadhaar.original_name || fn,
           };
+          newAadhaarOcrText = latestAadhaar.extracted_text || '';
+
           if (latestAadhaar.structured_data) {
             try {
               const sd = typeof latestAadhaar.structured_data === 'string'
@@ -545,25 +597,40 @@ export default function GovVerificationPage() {
                 aadhaarConfLvl = 'high';
               }
 
-              if (sd.applicant_name) {
-                newAppName = sd.applicant_name;
-                newNameSource = 'ocr';
-                if (sd.fields?.applicant_name) {
-                  setNameConfidenceLevel(sd.fields.applicant_name.confidence_level || 'high');
+              if (sd.fields?.applicant_name) {
+                const f = sd.fields.applicant_name;
+                if (f.value) {
+                  newAadhaarName = f.value;
+                  newAadhaarNameConf = f.confidence_level || 'high';
                 }
+              } else if (sd.applicant_name) {
+                newAadhaarName = sd.applicant_name;
+                newAadhaarNameConf = 'high';
+              }
+
+              if (sd.fields?.dob) {
+                newAadhaarDob = sd.fields.dob.value || '';
+              } else if (sd.dob) {
+                newAadhaarDob = sd.dob;
               }
             } catch (e) {}
           }
+        } else {
+          auditPatch.aadhaarStatus = 'Pending';
         }
 
-        let panScreenshotObj = currentCache.panScreenshot;
-        let newPanNum = currentCache.panNumber;
-        let newPanSource = currentCache.panSource || 'none';
-
-        let panQualWarn = currentCache.panQualityWarning || null;
-        let panConfLvl  = currentCache.panConfidenceLevel || null;
-        let panConfScr  = currentCache.panConfidenceScore || null;
-        let panWarn     = currentCache.panFieldWarning || null;
+        // PAN document processing
+        let panScreenshotObj = null;
+        let newPanNum = '';
+        let newPanSource = 'none';
+        let newPanName = '';
+        let newPanDob = '';
+        let newPanOcrText = '';
+        let newPanNameConf = null;
+        let panQualWarn = null;
+        let panConfLvl  = null;
+        let panConfScr  = null;
+        let panWarn     = null;
 
         if (latestPan && !currentCache.panRemoved) {
           const fn = latestPan.file_path.split(/[/\\]/).pop();
@@ -572,6 +639,8 @@ export default function GovVerificationPage() {
             url: `/uploads/${fn}`,
             name: latestPan.original_name || fn,
           };
+          newPanOcrText = latestPan.extracted_text || '';
+
           if (latestPan.structured_data) {
             try {
               const sd = typeof latestPan.structured_data === 'string'
@@ -597,69 +666,109 @@ export default function GovVerificationPage() {
                 panConfLvl = 'high';
               }
 
-              if (!newAppName && sd.applicant_name) {
-                newAppName = sd.applicant_name;
-                newNameSource = 'ocr';
-                if (sd.fields?.applicant_name) {
-                  setNameConfidenceLevel(sd.fields.applicant_name.confidence_level || 'high');
+              if (sd.fields?.applicant_name) {
+                const f = sd.fields.applicant_name;
+                if (f.value) {
+                  newPanName = f.value;
+                  newPanNameConf = f.confidence_level || 'high';
                 }
+              } else if (sd.applicant_name) {
+                newPanName = sd.applicant_name;
+                newPanNameConf = 'high';
+              }
+
+              if (sd.fields?.dob) {
+                newPanDob = sd.fields.dob.value || '';
+              } else if (sd.dob) {
+                newPanDob = sd.dob;
               }
             } catch (e) {}
           }
+        } else {
+          auditPatch.panStatus = 'Pending';
+        }
+
+        // Applicant name resolution
+        let resolvedAppName = '';
+        let resolvedNameSource = 'none';
+        let resolvedNameConf = null;
+
+        if (currentCache.nameSource === 'manual' && currentCache.applicantName) {
+          resolvedAppName = currentCache.applicantName;
+          resolvedNameSource = 'manual';
+        } else if (newAadhaarName) {
+          resolvedAppName = newAadhaarName;
+          resolvedNameSource = 'aadhaar';
+          resolvedNameConf = newAadhaarNameConf;
+        } else if (newPanName) {
+          resolvedAppName = newPanName;
+          resolvedNameSource = 'pan';
+          resolvedNameConf = newPanNameConf;
         }
 
         setData(prev => ({
           ...prev,
           ...auditPatch,
-          aadhaarScreenshot: currentCache.aadhaarRemoved ? null : (aadhaarScreenshotObj || prev.aadhaarScreenshot),
-          panScreenshot:     currentCache.panRemoved     ? null : (panScreenshotObj     || prev.panScreenshot),
+          aadhaarScreenshot: aadhaarScreenshotObj,
+          panScreenshot:     panScreenshotObj,
         }));
 
-        if (!currentCache.aadhaarRemoved && newAadhaarNum) {
-          setAadhaarNumber(newAadhaarNum);
-          setAadhaarSource(newAadhaarSource);
-        }
-        if (!currentCache.panRemoved && newPanNum) {
-          setPanNumber(newPanNum);
-          setPanSource(newPanSource);
-        }
-        if (newAppName) {
-          setApplicantName(newAppName);
-          setNameSource(newNameSource);
-        }
+        setAadhaarNumber(newAadhaarNum);
+        setAadhaarSource(newAadhaarSource);
+        setAadhaarName(newAadhaarName);
+        setAadhaarDob(newAadhaarDob);
+        setAadhaarOcrText(newAadhaarOcrText);
+        setAadhaarNameConfidence(newAadhaarNameConf);
+        setAadhaarQualityWarning(aadhaarQualWarn);
+        setAadhaarConfidenceLevel(aadhaarConfLvl);
+        setAadhaarConfidenceScore(aadhaarConfScr);
+        setAadhaarFieldWarning(aadhaarWarn);
 
-        if (!currentCache.aadhaarRemoved) {
-          setAadhaarQualityWarning(aadhaarQualWarn);
-          setAadhaarConfidenceLevel(aadhaarConfLvl);
-          setAadhaarConfidenceScore(aadhaarConfScr);
-          setAadhaarFieldWarning(aadhaarWarn);
-        }
-        if (!currentCache.panRemoved) {
-          setPanQualityWarning(panQualWarn);
-          setPanConfidenceLevel(panConfLvl);
-          setPanConfidenceScore(panConfScr);
-          setPanFieldWarning(panWarn);
-        }
+        setPanNumber(newPanNum);
+        setPanSource(newPanSource);
+        setPanName(newPanName);
+        setPanDob(newPanDob);
+        setPanOcrText(newPanOcrText);
+        setPanNameConfidence(newPanNameConf);
+        setPanQualityWarning(panQualWarn);
+        setPanConfidenceLevel(panConfLvl);
+        setPanConfidenceScore(panConfScr);
+        setPanFieldWarning(panWarn);
+
+        setApplicantName(resolvedAppName);
+        setNameSource(resolvedNameSource);
+        setNameConfidenceLevel(resolvedNameConf);
 
         // Keep cache synced
         saveGovCache(selectedAppId, {
           ...auditPatch,
-          aadhaarScreenshot: currentCache.aadhaarRemoved ? null : (aadhaarScreenshotObj || null),
-          panScreenshot:     currentCache.panRemoved     ? null : (panScreenshotObj     || null),
-          aadhaarNumber:     currentCache.aadhaarRemoved ? '' : (newAadhaarNum || ''),
-          panNumber:         currentCache.panRemoved     ? '' : (newPanNum || ''),
-          applicantName:     newAppName || '',
-          aadhaarSource:     currentCache.aadhaarRemoved ? 'none' : newAadhaarSource,
-          panSource:         currentCache.panRemoved     ? 'none' : newPanSource,
-          nameSource:        newNameSource,
-          aadhaarQualityWarning: currentCache.aadhaarRemoved ? null : aadhaarQualWarn,
-          panQualityWarning:     currentCache.panRemoved ? null : panQualWarn,
-          aadhaarConfidenceLevel:currentCache.aadhaarRemoved ? null : aadhaarConfLvl,
-          panConfidenceLevel:    currentCache.panRemoved ? null : panConfLvl,
-          aadhaarConfidenceScore:currentCache.aadhaarRemoved ? null : aadhaarConfScr,
-          panConfidenceScore:    currentCache.panRemoved ? null : panConfScr,
-          aadhaarFieldWarning:   currentCache.aadhaarRemoved ? null : aadhaarWarn,
-          panFieldWarning:       currentCache.panRemoved ? null : panWarn,
+          aadhaarScreenshot: aadhaarScreenshotObj,
+          panScreenshot:     panScreenshotObj,
+          aadhaarNumber:     newAadhaarNum,
+          panNumber:         newPanNum,
+          aadhaarName:       newAadhaarName,
+          panName:           newPanName,
+          aadhaarDob:        newAadhaarDob,
+          panDob:            newPanDob,
+          aadhaarOcrText:    newAadhaarOcrText,
+          panOcrText:        newPanOcrText,
+          aadhaarNameConfidence: newAadhaarNameConf,
+          panNameConfidence:     newPanNameConf,
+          applicantName:     resolvedAppName,
+          aadhaarSource:     newAadhaarSource,
+          panSource:         newPanSource,
+          nameSource:        resolvedNameSource,
+          nameConfidenceLevel: resolvedNameConf,
+          aadhaarQualityWarning: aadhaarQualWarn,
+          panQualityWarning:     panQualWarn,
+          aadhaarConfidenceLevel: aadhaarConfLvl,
+          panConfidenceLevel:    panConfLvl,
+          aadhaarConfidenceScore: aadhaarConfScr,
+          panConfidenceScore:    panConfScr,
+          aadhaarFieldWarning:   aadhaarWarn,
+          panFieldWarning:       panWarn,
+          aadhaarRemoved:        !latestAadhaar || Boolean(currentCache.aadhaarRemoved),
+          panRemoved:            !latestPan || Boolean(currentCache.panRemoved),
         });
       })
       .catch(err => {
@@ -723,10 +832,12 @@ export default function GovVerificationPage() {
 
       patchData({ aadhaarScreenshot: screenshotObj });
 
-      let newAadhaar = aadhaarNumber;
-      let newName = applicantName;
-      let newAadhaarSrc = aadhaarSource;
-      let newNameSrc = nameSource;
+      let newAadhaar = '';
+      let newAadhaarSrc = 'none';
+      let extractedName = '';
+      let extractedDob = '';
+      let extractedOcrText = doc.extracted_text || '';
+      let nameConf = null;
 
       let aadhaarQualWarn = null;
       let aadhaarConfLvl = null;
@@ -748,40 +859,52 @@ export default function GovVerificationPage() {
           if (f.value) {
             newAadhaar = f.value;
             newAadhaarSrc = 'ocr';
-            setAadhaarNumber(newAadhaar);
-            setAadhaarSource(newAadhaarSrc);
           }
           aadhaarConfLvl = f.confidence_level || (f.confidence >= 0.75 ? 'high' : 'low');
           aadhaarConfScr = f.confidence;
           aadhaarWarn = f.warning || null;
-
-          if (f.value && aadhaarConfLvl === 'high') {
-            toast.success(`OCR detected Aadhaar: ${newAadhaar} (High confidence)`, { id: toastId });
-          } else if (f.value) {
-            toast(`OCR detected Aadhaar: ${newAadhaar} (Low confidence - please verify)`, { icon: '⚠️', id: toastId });
-          } else {
-            toast.error(f.warning || "Could not detect Aadhaar number. Please upload a clearer image.", { id: toastId });
-          }
         } else if (sd.aadhaar_number) {
           newAadhaar = sd.aadhaar_number;
           newAadhaarSrc = 'ocr';
           aadhaarConfLvl = 'high';
-          setAadhaarNumber(newAadhaar);
-          setAadhaarSource(newAadhaarSrc);
-          toast.success(`OCR detected Aadhaar: ${newAadhaar}`, { id: toastId });
-        } else {
-          toast.error("Could not detect Aadhaar number. Please upload a clearer Aadhaar card image.", { id: toastId });
         }
 
-        if (sd.applicant_name) {
-          newName = sd.applicant_name;
-          newNameSrc = 'ocr';
-          setApplicantName(newName);
-          setNameSource(newNameSrc);
-          if (sd.fields?.applicant_name) {
-            setNameConfidenceLevel(sd.fields.applicant_name.confidence_level || 'high');
+        if (sd.fields?.applicant_name) {
+          const f = sd.fields.applicant_name;
+          if (f.value) {
+            extractedName = f.value;
+            nameConf = f.confidence_level || (f.confidence >= 0.75 ? 'high' : 'low');
           }
+        } else if (sd.applicant_name) {
+          extractedName = sd.applicant_name;
+          nameConf = 'high';
         }
+
+        if (sd.fields?.dob) {
+          extractedDob = sd.fields.dob.value || '';
+        } else if (sd.dob) {
+          extractedDob = sd.dob;
+        }
+      }
+
+      setAadhaarNumber(newAadhaar);
+      setAadhaarSource(newAadhaarSrc);
+      setAadhaarName(extractedName);
+      setAadhaarDob(extractedDob);
+      setAadhaarOcrText(extractedOcrText);
+      setAadhaarNameConfidence(nameConf);
+
+      let nextAppName = applicantName;
+      let nextNameSource = nameSource;
+      let nextNameConf = nameConfidenceLevel;
+
+      if (extractedName && nameSource !== 'manual') {
+        nextAppName = extractedName;
+        nextNameSource = 'aadhaar';
+        nextNameConf = nameConf;
+        setApplicantName(nextAppName);
+        setNameSource(nextNameSource);
+        setNameConfidenceLevel(nextNameConf);
       }
 
       setAadhaarQualityWarning(aadhaarQualWarn);
@@ -789,12 +912,25 @@ export default function GovVerificationPage() {
       setAadhaarConfidenceScore(aadhaarConfScr);
       setAadhaarFieldWarning(aadhaarWarn);
 
+      if (newAadhaar && aadhaarConfLvl === 'high') {
+        toast.success(`OCR detected Aadhaar: ${newAadhaar} (High confidence)`, { id: toastId });
+      } else if (newAadhaar) {
+        toast(`OCR detected Aadhaar: ${newAadhaar} (Low confidence - please verify)`, { icon: '⚠️', id: toastId });
+      } else {
+        toast.error(aadhaarWarn || "Could not detect Aadhaar number. Please upload a clearer image.", { id: toastId });
+      }
+
       saveGovCache(targetAppId, {
         aadhaarScreenshot: screenshotObj,
         aadhaarNumber: newAadhaar,
         aadhaarSource: newAadhaarSrc,
-        applicantName: newName,
-        nameSource: newNameSrc,
+        aadhaarName: extractedName,
+        aadhaarDob: extractedDob,
+        aadhaarOcrText: extractedOcrText,
+        aadhaarNameConfidence: nameConf,
+        applicantName: nextAppName,
+        nameSource: nextNameSource,
+        nameConfidenceLevel: nextNameConf,
         aadhaarQualityWarning: aadhaarQualWarn,
         aadhaarConfidenceLevel: aadhaarConfLvl,
         aadhaarConfidenceScore: aadhaarConfScr,
@@ -814,33 +950,74 @@ export default function GovVerificationPage() {
     if (data.aadhaarScreenshot?.url?.startsWith('blob:')) {
       URL.revokeObjectURL(data.aadhaarScreenshot.url);
     }
-    patchData({ aadhaarScreenshot: null });
+
+    // 1. Immediately reset Aadhaar verification state & result
+    patchData({
+      aadhaarScreenshot: null,
+      aadhaarStatus: 'Pending',
+    });
+
+    // 2. Immediately clear all Aadhaar-specific extracted fields
     setAadhaarNumber('');
     setAadhaarSource('none');
-
+    setAadhaarName('');
+    setAadhaarDob('');
+    setAadhaarOcrText('');
+    setAadhaarNameConfidence(null);
     setAadhaarQualityWarning(null);
     setAadhaarConfidenceLevel(null);
     setAadhaarConfidenceScore(null);
     setAadhaarFieldWarning(null);
 
+    // 3. Resolve applicant name: if it came from Aadhaar, fallback to PAN name or clear
+    let nextName = applicantName;
+    let nextNameSource = nameSource;
+    let nextNameConf = nameConfidenceLevel;
+    if (nameSource === 'aadhaar' || (!panName && nameSource !== 'manual')) {
+      if (panName) {
+        nextName = panName;
+        nextNameSource = 'pan';
+        nextNameConf = panNameConfidence || 'high';
+      } else {
+        nextName = '';
+        nextNameSource = 'none';
+        nextNameConf = null;
+      }
+      setApplicantName(nextName);
+      setNameSource(nextNameSource);
+      setNameConfidenceLevel(nextNameConf);
+    }
+
+    // 4. Immediately persist cleared state to localStorage
     saveGovCache(selectedAppId, {
       aadhaarScreenshot: null,
+      aadhaarStatus: 'Pending',
       aadhaarNumber: '',
       aadhaarSource: 'none',
+      aadhaarName: '',
+      aadhaarDob: '',
+      aadhaarOcrText: '',
+      aadhaarNameConfidence: null,
       aadhaarQualityWarning: null,
       aadhaarConfidenceLevel: null,
       aadhaarConfidenceScore: null,
       aadhaarFieldWarning: null,
       aadhaarRemoved: true,
+      applicantName: nextName,
+      nameSource: nextNameSource,
+      nameConfidenceLevel: nextNameConf,
     });
 
-    if (docId) {
-      try {
+    // 5. Backend deletion: delete from database, wipe files, reset gov_verification audit status
+    try {
+      if (docId) {
         await deleteDocument(docId);
-        toast.success('Aadhaar document removed');
-      } catch (e) {
-        console.error('Failed to delete Aadhaar document on backend', e);
       }
+      await deleteDocumentsByType(selectedAppId, 'aadhaar');
+      toast.success('Aadhaar document and extracted OCR data removed');
+    } catch (e) {
+      console.error('Failed to delete Aadhaar document on backend', e);
+      toast.error('Failed to delete Aadhaar document on server');
     }
   };
 
@@ -891,10 +1068,12 @@ export default function GovVerificationPage() {
 
       patchData({ panScreenshot: screenshotObj });
 
-      let newPan = panNumber;
-      let newName = applicantName;
-      let newPanSrc = panSource;
-      let newNameSrc = nameSource;
+      let newPan = '';
+      let newPanSrc = 'none';
+      let extractedName = '';
+      let extractedDob = '';
+      let extractedOcrText = doc.extracted_text || '';
+      let nameConf = null;
 
       let panQualWarn = null;
       let panConfLvl = null;
@@ -916,40 +1095,52 @@ export default function GovVerificationPage() {
           if (f.value) {
             newPan = f.value;
             newPanSrc = 'ocr';
-            setPanNumber(newPan);
-            setPanSource(newPanSrc);
           }
           panConfLvl = f.confidence_level || (f.confidence >= 0.75 ? 'high' : 'low');
           panConfScr = f.confidence;
           panWarn = f.warning || null;
-
-          if (f.value && panConfLvl === 'high') {
-            toast.success(`OCR detected PAN: ${newPan} (High confidence)`, { id: toastId });
-          } else if (f.value) {
-            toast(`OCR detected PAN: ${newPan} (Low confidence - please verify)`, { icon: '⚠️', id: toastId });
-          } else {
-            toast.error(f.warning || "Could not detect PAN number. Please upload a clearer image.", { id: toastId });
-          }
         } else if (sd.pan_number) {
           newPan = sd.pan_number;
           newPanSrc = 'ocr';
           panConfLvl = 'high';
-          setPanNumber(newPan);
-          setPanSource(newPanSrc);
-          toast.success(`OCR detected PAN: ${newPan}`, { id: toastId });
-        } else {
-          toast.error("Could not detect PAN number. Please upload a clearer PAN card image.", { id: toastId });
         }
 
-        if (sd.applicant_name && !applicantName) {
-          newName = sd.applicant_name;
-          newNameSrc = 'ocr';
-          setApplicantName(newName);
-          setNameSource(newNameSrc);
-          if (sd.fields?.applicant_name) {
-            setNameConfidenceLevel(sd.fields.applicant_name.confidence_level || 'high');
+        if (sd.fields?.applicant_name) {
+          const f = sd.fields.applicant_name;
+          if (f.value) {
+            extractedName = f.value;
+            nameConf = f.confidence_level || (f.confidence >= 0.75 ? 'high' : 'low');
           }
+        } else if (sd.applicant_name) {
+          extractedName = sd.applicant_name;
+          nameConf = 'high';
         }
+
+        if (sd.fields?.dob) {
+          extractedDob = sd.fields.dob.value || '';
+        } else if (sd.dob) {
+          extractedDob = sd.dob;
+        }
+      }
+
+      setPanNumber(newPan);
+      setPanSource(newPanSrc);
+      setPanName(extractedName);
+      setPanDob(extractedDob);
+      setPanOcrText(extractedOcrText);
+      setPanNameConfidence(nameConf);
+
+      let nextAppName = applicantName;
+      let nextNameSource = nameSource;
+      let nextNameConf = nameConfidenceLevel;
+
+      if (extractedName && (!applicantName || nameSource === 'none' || nameSource === 'pan')) {
+        nextAppName = extractedName;
+        nextNameSource = 'pan';
+        nextNameConf = nameConf;
+        setApplicantName(nextAppName);
+        setNameSource(nextNameSource);
+        setNameConfidenceLevel(nextNameConf);
       }
 
       setPanQualityWarning(panQualWarn);
@@ -957,12 +1148,25 @@ export default function GovVerificationPage() {
       setPanConfidenceScore(panConfScr);
       setPanFieldWarning(panWarn);
 
+      if (newPan && panConfLvl === 'high') {
+        toast.success(`OCR detected PAN: ${newPan} (High confidence)`, { id: toastId });
+      } else if (newPan) {
+        toast(`OCR detected PAN: ${newPan} (Low confidence - please verify)`, { icon: '⚠️', id: toastId });
+      } else {
+        toast.error(panWarn || "Could not detect PAN number. Please upload a clearer image.", { id: toastId });
+      }
+
       saveGovCache(targetAppId, {
         panScreenshot: screenshotObj,
         panNumber: newPan,
         panSource: newPanSrc,
-        applicantName: newName,
-        nameSource: newNameSrc,
+        panName: extractedName,
+        panDob: extractedDob,
+        panOcrText: extractedOcrText,
+        panNameConfidence: nameConf,
+        applicantName: nextAppName,
+        nameSource: nextNameSource,
+        nameConfidenceLevel: nextNameConf,
         panQualityWarning: panQualWarn,
         panConfidenceLevel: panConfLvl,
         panConfidenceScore: panConfScr,
@@ -982,33 +1186,74 @@ export default function GovVerificationPage() {
     if (data.panScreenshot?.url?.startsWith('blob:')) {
       URL.revokeObjectURL(data.panScreenshot.url);
     }
-    patchData({ panScreenshot: null });
+
+    // 1. Immediately reset PAN verification state & result
+    patchData({
+      panScreenshot: null,
+      panStatus: 'Pending',
+    });
+
+    // 2. Immediately clear all PAN-specific extracted fields
     setPanNumber('');
     setPanSource('none');
-
+    setPanName('');
+    setPanDob('');
+    setPanOcrText('');
+    setPanNameConfidence(null);
     setPanQualityWarning(null);
     setPanConfidenceLevel(null);
     setPanConfidenceScore(null);
     setPanFieldWarning(null);
 
+    // 3. Resolve applicant name: if it came from PAN, fallback to Aadhaar name or clear
+    let nextName = applicantName;
+    let nextNameSource = nameSource;
+    let nextNameConf = nameConfidenceLevel;
+    if (nameSource === 'pan' || (!aadhaarName && nameSource !== 'manual')) {
+      if (aadhaarName) {
+        nextName = aadhaarName;
+        nextNameSource = 'aadhaar';
+        nextNameConf = aadhaarNameConfidence || 'high';
+      } else {
+        nextName = '';
+        nextNameSource = 'none';
+        nextNameConf = null;
+      }
+      setApplicantName(nextName);
+      setNameSource(nextNameSource);
+      setNameConfidenceLevel(nextNameConf);
+    }
+
+    // 4. Immediately persist cleared state to localStorage
     saveGovCache(selectedAppId, {
       panScreenshot: null,
+      panStatus: 'Pending',
       panNumber: '',
       panSource: 'none',
+      panName: '',
+      panDob: '',
+      panOcrText: '',
+      panNameConfidence: null,
       panQualityWarning: null,
       panConfidenceLevel: null,
       panConfidenceScore: null,
       panFieldWarning: null,
       panRemoved: true,
+      applicantName: nextName,
+      nameSource: nextNameSource,
+      nameConfidenceLevel: nextNameConf,
     });
 
-    if (docId) {
-      try {
+    // 5. Backend deletion: delete from database, wipe files, reset gov_verification audit status
+    try {
+      if (docId) {
         await deleteDocument(docId);
-        toast.success('PAN document removed');
-      } catch (e) {
-        console.error('Failed to delete PAN document on backend', e);
       }
+      await deleteDocumentsByType(selectedAppId, 'pan');
+      toast.success('PAN document and extracted OCR data removed');
+    } catch (e) {
+      console.error('Failed to delete PAN document on backend', e);
+      toast.error('Failed to delete PAN document on server');
     }
   };
 
@@ -1148,7 +1393,7 @@ export default function GovVerificationPage() {
         <div className="px-6 py-6 space-y-5">
 
           {/* Extracted data (editable) */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 border border-slate-100 p-4 rounded-xl">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-slate-50 border border-slate-100 p-4 rounded-xl">
             <ExtractedField
               label="Applicant Name"
               value={applicantName}
@@ -1181,7 +1426,33 @@ export default function GovVerificationPage() {
               confidenceScore={aadhaarConfidenceScore}
               warningText={aadhaarFieldWarning}
             />
+            <ExtractedField
+              label="Date of Birth (DOB)"
+              value={aadhaarDob}
+              onChange={(val) => {
+                setAadhaarDob(val);
+                saveGovCache(selectedAppId, { aadhaarDob: val });
+              }}
+              source={aadhaarDob ? 'ocr' : 'none'}
+              loading={isExtractingAadhaar}
+              loadingText="Extracting DOB…"
+              missingText="DOB auto-extracted on upload"
+              placeholder="DOB (DD/MM/YYYY)"
+            />
           </div>
+
+          {/* Collapsible raw OCR text inspection */}
+          {aadhaarOcrText && (
+            <details className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-600 transition-all">
+              <summary className="font-semibold text-slate-700 cursor-pointer select-none flex items-center justify-between">
+                <span>View Extracted Aadhaar OCR Text</span>
+                <span className="text-[11px] font-normal text-slate-400">({aadhaarOcrText.length} characters)</span>
+              </summary>
+              <pre className="mt-2 p-2.5 bg-white border border-slate-200 rounded-lg text-[11px] font-mono whitespace-pre-wrap max-h-36 overflow-y-auto text-slate-700">
+                {aadhaarOcrText}
+              </pre>
+            </details>
+          )}
 
           {/* Image Quality Warning Alert */}
           {aadhaarQualityWarning && (
@@ -1278,7 +1549,7 @@ export default function GovVerificationPage() {
         <div className="px-6 py-6 space-y-5">
 
           {/* Extracted data (editable) */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 border border-slate-100 p-4 rounded-xl">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-slate-50 border border-slate-100 p-4 rounded-xl">
             <ExtractedField
               label="Applicant PAN Number"
               value={panNumber}
@@ -1307,13 +1578,39 @@ export default function GovVerificationPage() {
               source={aadhaarSource}
               loading={isExtractingAadhaar}
               loadingText="Scanning image with OCR model…"
-              missingText="Upload Aadhaar card image below to extract"
-              placeholder="Upload Aadhaar card below to extract Number"
+              missingText="Upload Aadhaar card image above to extract"
+              placeholder="Upload Aadhaar card above to extract Number"
               confidenceLevel={aadhaarConfidenceLevel}
               confidenceScore={aadhaarConfidenceScore}
               warningText={aadhaarFieldWarning}
             />
+            <ExtractedField
+              label="PAN Date of Birth (DOB)"
+              value={panDob}
+              onChange={(val) => {
+                setPanDob(val);
+                saveGovCache(selectedAppId, { panDob: val });
+              }}
+              source={panDob ? 'ocr' : 'none'}
+              loading={isExtractingPan}
+              loadingText="Extracting DOB…"
+              missingText="DOB auto-extracted on upload"
+              placeholder="DOB (DD/MM/YYYY)"
+            />
           </div>
+
+          {/* Collapsible raw OCR text inspection */}
+          {panOcrText && (
+            <details className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-600 transition-all">
+              <summary className="font-semibold text-slate-700 cursor-pointer select-none flex items-center justify-between">
+                <span>View Extracted PAN OCR Text</span>
+                <span className="text-[11px] font-normal text-slate-400">({panOcrText.length} characters)</span>
+              </summary>
+              <pre className="mt-2 p-2.5 bg-white border border-slate-200 rounded-lg text-[11px] font-mono whitespace-pre-wrap max-h-36 overflow-y-auto text-slate-700">
+                {panOcrText}
+              </pre>
+            </details>
+          )}
 
           {/* Image Quality Warning Alert */}
           {panQualityWarning && (
