@@ -136,6 +136,36 @@ docker-compose exec backend python scripts/seed.py
 
 ---
 
+## Run as a Single Project (Unified Mode)
+
+You can run both the React frontend and FastAPI backend together as a single unified project on a single port (`http://localhost:8000`):
+
+### Quick Run
+```bash
+# Windows Batch (Double-click or run from terminal)
+start.bat
+# or
+python run.py
+```
+
+- **Web Application UI:** `http://localhost:8000`
+- **Swagger API Docs:** `http://localhost:8000/api/docs`
+- **Health Check:** `http://localhost:8000/health`
+
+### Runner Options
+
+| Command | Description |
+|---------|-------------|
+| `python run.py` | Run unified server on `http://localhost:8000` (FastAPI serves React SPA) |
+| `python run.py --dev` | Dual development mode (FastAPI reload + React hot reload concurrently) |
+| `python run.py --check` | Verify database, environment, and frontend build integrity |
+| `python run.py --build` | Force rebuild of frontend bundle before launch |
+| `npm start` | Alias to `python run.py` (via root package.json) |
+| `.\run.ps1` | PowerShell launcher |
+| `.\start.bat` | Windows batch launcher |
+
+---
+
 ## Manual Setup
 
 ### Backend

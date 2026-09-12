@@ -9,8 +9,8 @@ import {
 const nav = [
   { to: "/dashboard",    label: "Dashboard",    icon: LayoutDashboard },
   { to: "/applications", label: "Applications", icon: FileText },
-  { to: "/upload",       label: "Upload Documents",  icon: Upload },
   { to: "/gov-verify",   label: "Gov Verification",  icon: Landmark },
+  { to: "/upload",       label: "Upload Documents",  icon: Upload },
   { to: "/verify",       label: "Verify",       icon: CheckCircle },
   { to: "/reports",      label: "Reports",      icon: BarChart3 },
 ];

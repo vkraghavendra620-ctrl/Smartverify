@@ -47,15 +47,13 @@ def preprocess_image(input_path: str) -> str:
                            [0, -1, 0]], dtype=np.float32)
         sharpened = cv2.filter2D(denoised, -1, kernel)
 
-        # 6. Adaptive Thresholding
+        # 6. Calculate deskew angle using threshold, but apply to enhanced grayscale image
         thresh = cv2.adaptiveThreshold(
             sharpened, 255,
             cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
             cv2.THRESH_BINARY, 11, 2
         )
-
-        # 7. Deskew
-        deskewed = _deskew(thresh)
+        deskewed = _deskew(sharpened, thresh)
 
         # Save preprocessed image
         out_path = _output_path(input_path, "_prep.png")
@@ -82,10 +80,11 @@ def _pil_preprocess(input_path: str) -> str:
         return input_path
 
 
-def _deskew(image: np.ndarray) -> np.ndarray:
-    """Correct skew in binary image."""
+def _deskew(image: np.ndarray, thresh_img: np.ndarray = None) -> np.ndarray:
+    """Correct skew in image using binary mask for angle calculation."""
     try:
-        coords = np.column_stack(np.where(image > 0))
+        mask = thresh_img if thresh_img is not None else image
+        coords = np.column_stack(np.where(mask > 0))
         if len(coords) < 10:
             return image
         angle = cv2.minAreaRect(coords)[-1]
@@ -95,7 +94,7 @@ def _deskew(image: np.ndarray) -> np.ndarray:
             angle = -angle
         if abs(angle) < 0.5 or abs(angle) > 45:
             return image
-        h, w = image.shape
+        h, w = image.shape[:2]
         center = (w // 2, h // 2)
         M = cv2.getRotationMatrix2D(center, angle, 1.0)
         rotated = cv2.warpAffine(image, M, (w, h), flags=cv2.INTER_CUBIC,

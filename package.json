@@ -1,0 +1,13 @@
+{
+  "name": "smartverify",
+  "version": "1.0.0",
+  "description": "SmartVerify – Autonomous AI System for Intelligent Loan Verification",
+  "scripts": {
+    "start": "python run.py",
+    "dev": "python run.py --dev",
+    "build": "cd frontend && npm run build",
+    "check": "python run.py --check",
+    "backend": "cd backend && .venv\\Scripts\\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload",
+    "frontend": "cd frontend && npm start"
+  }
+}

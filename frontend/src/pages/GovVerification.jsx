@@ -8,7 +8,14 @@ import {
   CheckCircle, AlertCircle, Loader2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { submitGovVerification, getApplication, getDocuments } from '../services/api';
+import {
+  submitGovVerification,
+  getApplication,
+  getDocuments,
+  getApplications,
+  uploadDocument,
+  processDocument
+} from '../services/api';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -119,16 +126,16 @@ function statusConfig(status) {
 
 // ─── Extracted Field Display ──────────────────────────────────────────────────
 
-function ExtractedField({ label, value, source, loading, missingText }) {
+function ExtractedField({ label, value, onChange, source, loading, loadingText, missingText, placeholder }) {
   if (loading) {
     return (
       <div>
         <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
           {label}
         </label>
-        <div className="flex items-center gap-2 h-10 bg-slate-50 rounded-xl border border-slate-200 px-3">
-          <Loader2 className="w-4 h-4 text-slate-400 animate-spin" />
-          <span className="text-sm text-slate-400">Loading from OCR…</span>
+        <div className="flex items-center gap-2 h-10 bg-blue-50 rounded-xl border border-blue-200 px-3 text-blue-700">
+          <Loader2 className="w-4 h-4 text-blue-600 animate-spin flex-shrink-0" />
+          <span className="text-sm font-medium">{loadingText || "Scanning image with OCR…"}</span>
         </div>
       </div>
     );
@@ -144,33 +151,38 @@ function ExtractedField({ label, value, source, loading, missingText }) {
       <div className="flex items-center gap-2">
         <input
           type="text"
-          readOnly
           value={hasValue ? value : ''}
-          placeholder={missingText || `No ${label} extracted`}
-          className={`input font-mono tracking-wider cursor-not-allowed select-all border-slate-200
+          onChange={(e) => onChange && onChange(e.target.value)}
+          placeholder={placeholder || `Upload image below to extract ${label}`}
+          className={`input font-mono tracking-wider border-slate-200
             ${hasValue
-              ? 'bg-white text-slate-800 uppercase'
+              ? 'bg-white text-slate-800 uppercase font-semibold'
               : 'bg-slate-50 text-slate-400 placeholder:text-slate-400 placeholder:italic placeholder:font-sans placeholder:tracking-normal'
             }`}
         />
         <div
           className="flex-shrink-0 p-2 rounded-lg bg-white border border-slate-200"
-          title="Read-only — auto-extracted by OCR + NLP pipeline"
+          title={source === 'ocr' ? 'Auto-extracted by OCR from uploaded image' : 'Editable field'}
         >
           <BadgeInfo className="w-4 h-4 text-slate-400" />
         </div>
       </div>
       <div className="mt-1.5 flex items-center gap-1.5">
-        {source === 'ocr' ? (
+        {source === 'ocr' && hasValue ? (
           <>
-            <CheckCircle className="w-3 h-3 text-emerald-500 flex-shrink-0" />
-            <span className="text-xs text-emerald-600 font-medium">Extracted from OCR</span>
+            <CheckCircle className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
+            <span className="text-xs text-emerald-600 font-semibold">Extracted from uploaded image (OCR)</span>
+          </>
+        ) : hasValue ? (
+          <>
+            <CheckCircle className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
+            <span className="text-xs text-blue-600 font-medium">Entered manually</span>
           </>
         ) : (
           <>
-            <AlertCircle className="w-3 h-3 text-amber-500 flex-shrink-0" />
-            <span className="text-xs text-amber-600">
-              Not yet extracted — upload &amp; process document first
+            <AlertCircle className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+            <span className="text-xs text-slate-400">
+              {missingText || 'Waiting for image upload — drop image in box below'}
             </span>
           </>
         )}
@@ -291,32 +303,52 @@ const INITIAL_STATE = {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function GovVerificationPage() {
-  const { appId }  = useParams();
+  const { appId: routeAppId } = useParams();
   const navigate   = useNavigate();
   const [data, setData]         = useState({ ...INITIAL_STATE });
   const [isSaving, setIsSaving] = useState(false);
 
-  // OCR-extracted values
-  const [panNumber,     setPanNumber]     = useState(null);
-  const [aadhaarNumber, setAadhaarNumber] = useState(null);
-  const [applicantName, setApplicantName] = useState(null);
-  const [panSource,     setPanSource]     = useState('none');
-  const [aadhaarSource, setAadhaarSource] = useState('none');
-  const [nameSource,    setNameSource]    = useState('none');
-  const [extracting,    setExtracting]   = useState(true);
+  // Application selection state
+  const [apps, setApps]                   = useState([]);
+  const [selectedAppId, setSelectedAppId] = useState(routeAppId || '');
 
-  // ── Load application + documents on mount ──────────────────────────────
+  // OCR-extracted values (start empty, populated only when user uploads an image to run OCR)
+  const [panNumber,           setPanNumber]           = useState('');
+  const [aadhaarNumber,       setAadhaarNumber]       = useState('');
+  const [applicantName,       setApplicantName]       = useState('');
+  const [panSource,           setPanSource]           = useState('none');
+  const [aadhaarSource,       setAadhaarSource]       = useState('none');
+  const [nameSource,          setNameSource]          = useState('none');
+  const [isExtractingAadhaar, setIsExtractingAadhaar] = useState(false);
+  const [isExtractingPan,     setIsExtractingPan]     = useState(false);
+
+  // 1. Fetch applications list on mount
   useEffect(() => {
-    if (!appId) return;
-    setExtracting(true);
-    Promise.all([
-      getApplication(appId),
-      getDocuments(appId),
-    ])
-      .then(([appRes, docsRes]) => {
-        const appData = appRes.data;
+    getApplications()
+      .then((r) => {
+        const list = r.data || [];
+        setApps(list);
+        if (!selectedAppId && list.length > 0) {
+          setSelectedAppId(String(list[0].id));
+        }
+      })
+      .catch((err) => console.error('Failed to load applications', err));
+  }, []);
 
-        // Restore saved gov verification state
+  // Update selectedAppId if route changes
+  useEffect(() => {
+    if (routeAppId) {
+      setSelectedAppId(String(routeAppId));
+    }
+  }, [routeAppId]);
+
+  // 2. Load saved verification audit info when selectedAppId changes (DO NOT pre-fill OCR fields)
+  useEffect(() => {
+    if (!selectedAppId) return;
+
+    getApplication(selectedAppId)
+      .then((appRes) => {
+        const appData = appRes.data || {};
         const gov = appData.gov_verification;
         if (gov) {
           const parts = gov.timestamp ? gov.timestamp.split(' ') : [];
@@ -330,26 +362,11 @@ export default function GovVerificationPage() {
             remarks:        gov.remarks || '',
           }));
         }
-
-        // Applicant name from application record first, then documents
-        const appName = appData.applicant_name || null;
-
-        // Extract from documents
-        const docs      = docsRes.data || [];
-        const extracted = extractFromDocuments(docs);
-        setPanNumber(extracted.panNumber);
-        setAadhaarNumber(extracted.aadhaarNumber);
-        setApplicantName(appName || extracted.applicantName);
-        setPanSource(extracted.panSource);
-        setAadhaarSource(extracted.aadhaarSource);
-        setNameSource(appName ? 'ocr' : extracted.nameSource);
       })
       .catch(err => {
         console.error('Error loading gov verification data', err);
-        toast.error('Could not load application data');
-      })
-      .finally(() => setExtracting(false));
-  }, [appId]);
+      });
+  }, [selectedAppId]);
 
   const patchData = (patch) => setData(prev => ({ ...prev, ...patch }));
 
@@ -367,15 +384,56 @@ export default function GovVerificationPage() {
     });
   };
 
-  const handleAadhaarScreenshotAccepted = (file) => {
+  const handleAadhaarScreenshotAccepted = async (file) => {
     const url = URL.createObjectURL(file);
     patchData({ aadhaarScreenshot: { url, name: file.name, size: file.size } });
-    toast.success('Aadhaar screenshot uploaded!');
+    toast.success('Image selected — starting OCR extraction...');
+
+    // Run OCR directly on the newly uploaded image
+    const targetAppId = selectedAppId || (apps.length > 0 ? String(apps[0].id) : '1');
+    setIsExtractingAadhaar(true);
+    const toastId = toast.loading(`Scanning ${file.name} with OCR model...`);
+
+    try {
+      const formData = new FormData();
+      formData.append('application_id', targetAppId);
+      formData.append('document_type', 'aadhaar');
+      formData.append('file', file);
+      const upRes = await uploadDocument(formData);
+      const procRes = await processDocument(upRes.data.id);
+
+      if (procRes.data && procRes.data.structured_data) {
+        const sd = typeof procRes.data.structured_data === 'string'
+          ? JSON.parse(procRes.data.structured_data)
+          : procRes.data.structured_data;
+
+        if (sd.applicant_name) {
+          setApplicantName(sd.applicant_name);
+          setNameSource('ocr');
+        }
+        if (sd.aadhaar_number) {
+          setAadhaarNumber(sd.aadhaar_number);
+          setAadhaarSource('ocr');
+        }
+        toast.success(`OCR successfully extracted details from ${file.name}!`, { id: toastId });
+      } else {
+        toast.dismiss(toastId);
+      }
+    } catch (err) {
+      console.error('OCR on uploaded image failed:', err);
+      toast.error('OCR could not read document. You can enter details manually.', { id: toastId });
+    } finally {
+      setIsExtractingAadhaar(false);
+    }
   };
 
   const handleClearAadhaarScreenshot = () => {
     if (data.aadhaarScreenshot?.url) URL.revokeObjectURL(data.aadhaarScreenshot.url);
     patchData({ aadhaarScreenshot: null });
+    setApplicantName('');
+    setAadhaarNumber('');
+    setNameSource('none');
+    setAadhaarSource('none');
   };
 
   // ── PAN handlers ───────────────────────────────────────────────────────
@@ -392,20 +450,58 @@ export default function GovVerificationPage() {
     });
   };
 
-  const handlePanScreenshotAccepted = (file) => {
+  const handlePanScreenshotAccepted = async (file) => {
     const url = URL.createObjectURL(file);
     patchData({ panScreenshot: { url, name: file.name, size: file.size } });
-    toast.success('PAN screenshot uploaded!');
+    toast.success('Image selected — starting OCR extraction...');
+
+    const targetAppId = selectedAppId || (apps.length > 0 ? String(apps[0].id) : '1');
+    setIsExtractingPan(true);
+    const toastId = toast.loading(`Scanning ${file.name} with OCR model...`);
+
+    try {
+      const formData = new FormData();
+      formData.append('application_id', targetAppId);
+      formData.append('document_type', 'pan');
+      formData.append('file', file);
+      const upRes = await uploadDocument(formData);
+      const procRes = await processDocument(upRes.data.id);
+
+      if (procRes.data && procRes.data.structured_data) {
+        const sd = typeof procRes.data.structured_data === 'string'
+          ? JSON.parse(procRes.data.structured_data)
+          : procRes.data.structured_data;
+
+        if (sd.pan_number) {
+          setPanNumber(sd.pan_number);
+          setPanSource('ocr');
+        }
+        if (sd.applicant_name && !applicantName) {
+          setApplicantName(sd.applicant_name);
+          setNameSource('ocr');
+        }
+        toast.success(`OCR successfully extracted PAN from ${file.name}!`, { id: toastId });
+      } else {
+        toast.dismiss(toastId);
+      }
+    } catch (err) {
+      console.error('OCR on uploaded PAN image failed:', err);
+      toast.error('OCR could not read PAN. You can enter details manually.', { id: toastId });
+    } finally {
+      setIsExtractingPan(false);
+    }
   };
 
   const handleClearPanScreenshot = () => {
     if (data.panScreenshot?.url) URL.revokeObjectURL(data.panScreenshot.url);
     patchData({ panScreenshot: null });
+    setPanNumber('');
+    setPanSource('none');
   };
 
   // ── Save ───────────────────────────────────────────────────────────────
   const handleSave = async () => {
-    if (!appId) return toast.error('No Application ID provided');
+    if (!selectedAppId) return toast.error('Please select an application first');
     if (data.aadhaarStatus === 'Valid' && !data.aadhaarScreenshot) {
       toast.error('Screenshot is mandatory when Aadhaar status is Valid');
       return;
@@ -426,9 +522,9 @@ export default function GovVerificationPage() {
         remarks:                 data.remarks,
         screenshot_path:         data.panScreenshot ? data.panScreenshot.name : '',
       };
-      await submitGovVerification(appId, payload);
+      await submitGovVerification(selectedAppId, payload);
       toast.success('Verifications saved successfully!');
-      navigate('/applications');
+      navigate('/verify');
     } catch {
       toast.error('Failed to save verification');
     } finally {
@@ -455,12 +551,38 @@ export default function GovVerificationPage() {
         <button
           id="gov-save-btn"
           onClick={handleSave}
-          disabled={isSaving}
+          disabled={isSaving || !selectedAppId}
           className="flex items-center gap-2 bg-primary-600 hover:bg-primary-700 text-white px-5 py-2.5 rounded-xl font-semibold transition-colors disabled:opacity-50"
         >
           <Save className="w-4 h-4" />
           {isSaving ? 'Saving…' : 'Save Verifications'}
         </button>
+      </div>
+
+      {/* Application Selector */}
+      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex-1">
+          <label className="block text-xs font-bold text-slate-600 uppercase tracking-wide mb-1">
+            Active Loan Application
+          </label>
+          <select
+            value={selectedAppId}
+            onChange={(e) => setSelectedAppId(e.target.value)}
+            className="input max-w-lg font-medium text-slate-800"
+          >
+            <option value="">— Select an application —</option>
+            {apps.map((a) => (
+              <option key={a.id} value={a.id}>
+                #{a.id} — {a.applicant_name || 'Applicant'} ({a.branch || 'Main Branch'}) | ₹{Number(a.loan_amount).toLocaleString('en-IN')}
+              </option>
+            ))}
+          </select>
+        </div>
+        {selectedAppId && (
+          <span className="text-xs font-semibold px-3 py-1.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 self-start sm:self-center">
+            Application #{selectedAppId}
+          </span>
+        )}
       </div>
 
       {/* Step connector */}
@@ -503,21 +625,27 @@ export default function GovVerificationPage() {
         {/* Card body */}
         <div className="px-6 py-6 space-y-5">
 
-          {/* Extracted data (read-only) */}
+          {/* Extracted data (editable) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 border border-slate-100 p-4 rounded-xl">
             <ExtractedField
               label="Applicant Name"
               value={applicantName}
+              onChange={setApplicantName}
               source={nameSource}
-              loading={extracting}
-              missingText="No Aadhaar extracted"
+              loading={isExtractingAadhaar}
+              loadingText="Scanning image with OCR model…"
+              missingText="Upload Aadhaar card image below to extract"
+              placeholder="Upload Aadhaar card image below to extract Name"
             />
             <ExtractedField
               label="Applicant Aadhaar Number"
               value={aadhaarNumber}
+              onChange={setAadhaarNumber}
               source={aadhaarSource}
-              loading={extracting}
-              missingText="No Aadhaar extracted"
+              loading={isExtractingAadhaar}
+              loadingText="Scanning image with OCR model…"
+              missingText="Upload Aadhaar card image below to extract"
+              placeholder="Upload Aadhaar card image below to extract Number"
             />
           </div>
 
@@ -604,21 +732,27 @@ export default function GovVerificationPage() {
         {/* Card body */}
         <div className="px-6 py-6 space-y-5">
 
-          {/* Extracted data (read-only) */}
+          {/* Extracted data (editable) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 border border-slate-100 p-4 rounded-xl">
             <ExtractedField
               label="Applicant PAN Number"
               value={panNumber}
+              onChange={setPanNumber}
               source={panSource}
-              loading={extracting}
-              missingText="No PAN extracted"
+              loading={isExtractingPan}
+              loadingText="Scanning PAN image with OCR model…"
+              missingText="Upload PAN card image below to extract"
+              placeholder="Upload PAN card below to extract Number"
             />
             <ExtractedField
               label="Applicant Aadhaar Number"
               value={aadhaarNumber}
+              onChange={setAadhaarNumber}
               source={aadhaarSource}
-              loading={extracting}
-              missingText="No Aadhaar extracted"
+              loading={isExtractingAadhaar}
+              loadingText="Scanning image with OCR model…"
+              missingText="Upload Aadhaar card image below to extract"
+              placeholder="Upload Aadhaar card below to extract Number"
             />
           </div>
 
