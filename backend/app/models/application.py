@@ -14,7 +14,7 @@ class ApplicationStatus(str, enum.Enum):
 class Application(Base):
     __tablename__ = "applications"
     id             = Column(Integer, primary_key=True, index=True)
-    user_id        = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id        = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     applicant_name = Column(String(255))
     
     branch         = Column(String(255), nullable=True)
@@ -31,7 +31,7 @@ class Application(Base):
     address        = Column(String(500), nullable=True)
     father_name    = Column(String(255), nullable=True)
     
-    status         = Column(SAEnum(ApplicationStatus), default=ApplicationStatus.pending)
+    status         = Column(SAEnum(ApplicationStatus, native_enum=False), default=ApplicationStatus.pending)
     created_at     = Column(DateTime, default=datetime.utcnow)
     updated_at     = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     user      = relationship("User", back_populates="applications")
@@ -44,10 +44,14 @@ class Application(Base):
                                     cascade="all, delete-orphan")
     joint_applicants = relationship("JointApplicant", back_populates="application", cascade="all, delete-orphan")
     property_details = relationship("PropertyDetails", back_populates="application", uselist=False, cascade="all, delete-orphan")
+    chat_messages = relationship("ChatMessage", back_populates="application", cascade="all, delete-orphan")
+    findings = relationship("ApplicationFinding", back_populates="application", cascade="all, delete-orphan")
+    gov_screenshots = relationship("GovernmentVerificationScreenshot", back_populates="application", cascade="all, delete-orphan")
+    verification_results = relationship("VerificationResult", back_populates="application", cascade="all, delete-orphan")
 class SiteVerification(Base):
     __tablename__ = "site_verifications"
     id              = Column(Integer, primary_key=True, index=True)
-    application_id  = Column(Integer, ForeignKey("applications.id"), nullable=False, unique=True)
+    application_id  = Column(Integer, ForeignKey("applications.id", ondelete="CASCADE"), nullable=False, unique=True)
     gps_coordinates      = Column(String(255), nullable=True)
     officer_name         = Column(String(100), nullable=True)
     date                 = Column(String(50), nullable=True)
@@ -66,7 +70,7 @@ class SiteVerification(Base):
 class JointApplicant(Base):
     __tablename__ = "joint_applicants"
     id             = Column(Integer, primary_key=True, index=True)
-    application_id = Column(Integer, ForeignKey("applications.id"), nullable=False)
+    application_id = Column(Integer, ForeignKey("applications.id", ondelete="CASCADE"), nullable=False)
     index          = Column(Integer, nullable=False)
     relationship_type   = Column(String(100), nullable=True)
     mobile         = Column(String(20), nullable=True)
@@ -80,7 +84,7 @@ class JointApplicant(Base):
 class PropertyDetails(Base):
     __tablename__ = "property_details"
     id                  = Column(Integer, primary_key=True, index=True)
-    application_id      = Column(Integer, ForeignKey("applications.id"), nullable=False, unique=True)
+    application_id      = Column(Integer, ForeignKey("applications.id", ondelete="CASCADE"), nullable=False, unique=True)
     property_type       = Column(String(100), nullable=True)
     address             = Column(String(500), nullable=True)
     village_city        = Column(String(100), nullable=True)
@@ -101,7 +105,7 @@ class PropertyDetails(Base):
 class GovVerification(Base):
     __tablename__ = "gov_verifications"
     id = Column(Integer, primary_key=True, index=True)
-    application_id = Column(Integer, ForeignKey("applications.id"), nullable=False, unique=True)
+    application_id = Column(Integer, ForeignKey("applications.id", ondelete="CASCADE"), nullable=False, unique=True)
     pan_aadhaar_link_status = Column(String(50), nullable=True)
     tax_receipt_status = Column(String(50), nullable=True)
     aadhaar_validity_status = Column(String(50), nullable=True)

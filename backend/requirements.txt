@@ -4,6 +4,7 @@ pydantic
 pydantic-settings
 sqlalchemy
 alembic
+psycopg2-binary>=2.9.9
 python-jose[cryptography]
 passlib[bcrypt]
 python-multipart

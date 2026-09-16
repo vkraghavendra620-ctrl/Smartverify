@@ -24,13 +24,21 @@ class DocumentType(str, enum.Enum):
     site_side_view   = "site_side_view"
     site_interior    = "site_interior"
     site_entrance    = "site_entrance"
-    site_landmark    = "site_landmark"
+    # Additional Identity, Income, Asset & Chatbot types
+    driving_licence  = "driving_licence"
+    itr              = "itr"
+    residence_proof  = "residence_proof"
+    house_photograph = "house_photograph"
+    vehicle_document = "vehicle_document"
+    invoice          = "invoice"
+    chatbot_upload   = "chatbot_upload"
+    other            = "other"
 
 class Document(Base):
     __tablename__ = "documents"
     id             = Column(Integer, primary_key=True, index=True)
-    application_id = Column(Integer, ForeignKey("applications.id"), nullable=False)
-    document_type  = Column(SAEnum(DocumentType), nullable=False)
+    application_id = Column(Integer, ForeignKey("applications.id", ondelete="CASCADE"), nullable=False)
+    document_type  = Column(SAEnum(DocumentType, native_enum=False), nullable=False)
     file_path      = Column(String(500), nullable=False)
     original_name  = Column(String(255))
     extracted_text = Column(Text)
@@ -39,3 +47,4 @@ class Document(Base):
     joint_applicant_index = Column(Integer, nullable=True, default=None)
     created_at     = Column(DateTime, default=datetime.utcnow)
     application = relationship("Application", back_populates="documents")
+    findings    = relationship("ApplicationFinding", secondary="finding_documents", back_populates="documents")

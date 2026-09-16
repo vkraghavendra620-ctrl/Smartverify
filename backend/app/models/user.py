@@ -15,6 +15,6 @@ class User(Base):
     name       = Column(String(255), nullable=False)
     email      = Column(String(255), unique=True, index=True, nullable=False)
     password   = Column(String(255), nullable=False)
-    role       = Column(SAEnum(UserRole), default=UserRole.loan_officer, nullable=False)
-    # created_at = Column(DateTime, default=datetime.utcnow)
+    role       = Column(SAEnum(UserRole, native_enum=False), default=UserRole.loan_officer, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     applications = relationship("Application", back_populates="user")

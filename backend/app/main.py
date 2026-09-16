@@ -17,8 +17,9 @@ from app.db.database import engine, Base
 setup_logging()
 logger = logging.getLogger(__name__)
 
-# Create all tables
-Base.metadata.create_all(bind=engine)
+# Create all tables only for SQLite local development; PostgreSQL schema is managed by Alembic
+if settings.DATABASE_URL.startswith("sqlite"):
+    Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="SmartVerify API",

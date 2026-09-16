@@ -30,6 +30,7 @@ backend/smartverify.db
 smartverify.db
 backend/chroma_db/
 chroma_db/
+scratch_pg/
 
 # Uploads, Reports & Logs
 uploads/
