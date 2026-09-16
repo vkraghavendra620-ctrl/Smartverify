@@ -6,9 +6,9 @@ Constructs rich field metadata (value, confidence, source, method, status)
 while maintaining top-level flat key compatibility.
 """
 import re, logging
-from typing import Dict, Any, Optional
-from app.services.parsers.aadhaar_parser import parse_aadhaar
-from app.services.parsers.pan_parser import parse_pan
+from typing import Dict, Any, Optional, Union
+from app.services.parsers.aadhaar_parser import parse_aadhaar, parse_aadhaar_multipass
+from app.services.parsers.pan_parser import parse_pan, parse_pan_multipass, extract_pan_candidates
 
 logger = logging.getLogger(__name__)
 
@@ -28,11 +28,77 @@ def _get_nlp():
     return _nlp
 
 
-def extract_information(text: str, doc_type: str = "generic") -> Dict[str, Any]:
+def extract_information_multipass(ocr_result: Dict[str, Any], doc_type: str = "generic") -> Dict[str, Any]:
     """
-    Extract key fields from OCR text.
+    Extract structured fields from multi-pass OCR results with consensus and image quality metadata.
+    """
+    passes = ocr_result.get("passes", [])
+    quality = ocr_result.get("quality", {})
+    primary_text = ocr_result.get("primary_text", "")
+
+    info: Dict[str, Any] = {
+        "applicant_name": None,
+        "address": None,
+        "aadhaar_number": None,
+        "pan_number": None,
+        "employer_name": None,
+        "monthly_income": None,
+        "bank_account": None,
+        "loan_amount": None,
+        "dob": None,
+        "phone": None,
+        "gender": None,
+        "father_name": None,
+        "document_type": doc_type,
+        "fields": {},
+        "image_quality": quality,
+        "multi_pass": {
+            "passes_count": len(passes),
+            "variants": [p.get("variant") for p in passes],
+        }
+    }
+
+    parsed_fields: Dict[str, Any] = {}
+    if doc_type == "aadhaar":
+        parsed_fields = parse_aadhaar_multipass(passes)
+    elif doc_type == "pan":
+        parsed_fields = parse_pan_multipass(passes)
+    else:
+        parsed_fields = {}
+
+    for k, meta in parsed_fields.items():
+        if meta and meta.get("value"):
+            info[k] = meta["value"]
+
+    info["fields"] = parsed_fields
+    info["field_confidences"] = {
+        k: meta.get("confidence_level", "low")
+        for k, meta in parsed_fields.items()
+        if isinstance(meta, dict)
+    }
+
+    # If any generic fields missing, run standard regex passes on primary text
+    if primary_text:
+        fallback_res = extract_information(primary_text, doc_type=doc_type)
+        for k in ["dob", "gender", "father_name", "phone", "monthly_income", "bank_account", "loan_amount"]:
+            if not info.get(k) and fallback_res.get(k):
+                info[k] = fallback_res[k]
+                if fallback_res.get("fields", {}).get(k):
+                    info["fields"][k] = fallback_res["fields"][k]
+
+    return info
+
+
+def extract_information(text_or_result: Union[str, Dict[str, Any]], doc_type: str = "generic") -> Dict[str, Any]:
+    """
+    Extract key fields from OCR text or multi-pass OCR result dict.
     Returns a dict with all extracted fields (flat values + rich 'fields' metadata).
     """
+    if isinstance(text_or_result, dict) and "passes" in text_or_result:
+        return extract_information_multipass(text_or_result, doc_type=doc_type)
+
+    text = str(text_or_result or "")
+
     info: Dict[str, Any] = {
         "applicant_name": None,
         "address": None,
@@ -66,6 +132,8 @@ def extract_information(text: str, doc_type: str = "generic") -> Dict[str, Any]:
         if meta and meta.get("value"):
             info[k] = meta["value"]
 
+    info["fields"] = parsed_fields
+
     # Fallback extraction for generic fields / missing parser fields
     # ── Aadhaar Number ──────────────────────────────────────────────────
     if not info["aadhaar_number"]:
@@ -83,15 +151,15 @@ def extract_information(text: str, doc_type: str = "generic") -> Dict[str, Any]:
 
     # ── PAN Number ──────────────────────────────────────────────────────
     if not info["pan_number"]:
-        pan_match = re.search(r"\b([A-Z]{5}[0-9]{4}[A-Z])\b", text.upper())
-        if pan_match:
-            pan_val = pan_match.group(1)
-            info["pan_number"] = pan_val
+        pan_cands = extract_pan_candidates(text)
+        if pan_cands:
+            best_pan = pan_cands[0]
+            info["pan_number"] = best_pan["pan"]
             parsed_fields["pan_number"] = {
-                "value": pan_val,
-                "confidence": 0.99,
+                "value": best_pan["pan"],
+                "confidence": best_pan["confidence"],
                 "source_document": doc_type,
-                "extraction_method": "generic_regex",
+                "extraction_method": best_pan["method"],
                 "validation_status": "valid"
             }
 
