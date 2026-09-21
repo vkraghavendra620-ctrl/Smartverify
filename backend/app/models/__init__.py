@@ -13,6 +13,7 @@ from app.models.chat_message import ChatMessage
 from app.models.finding import ApplicationFinding, FindingStatus, finding_documents
 from app.models.government_screenshot import GovernmentVerificationScreenshot
 from app.models.verification_result import VerificationResult
+from app.models.reverification_report import ReverificationReport
 
 __all__ = [
     "User",
@@ -32,4 +33,5 @@ __all__ = [
     "finding_documents",
     "GovernmentVerificationScreenshot",
     "VerificationResult",
+    "ReverificationReport",
 ]

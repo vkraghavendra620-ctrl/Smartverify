@@ -14,6 +14,7 @@ import VerifyPage           from "./pages/VerifyPage";
 import ReportsPage          from "./pages/ReportsPage";
 import GovVerificationPage  from "./pages/GovVerification";
 import ReportViewPage       from "./pages/ReportViewPage";
+import ReportReviewPage     from "./pages/ReportReviewPage";
 import UsersPage            from "./pages/UsersPage";
 
 function PrivateLayout({ children }) {
@@ -41,6 +42,7 @@ export default function App() {
           <Route path="/gov-verify/:appId"   element={<PrivateLayout><GovVerificationPage /></PrivateLayout>} />
           <Route path="/reports"      element={<PrivateLayout><ReportsPage /></PrivateLayout>} />
           <Route path="/report/:appId" element={<PrivateLayout><ReportViewPage /></PrivateLayout>} />
+          <Route path="/report/:appId/review" element={<PrivateLayout><ReportReviewPage /></PrivateLayout>} />
           <Route path="/admin/users"  element={<PrivateLayout><UsersPage /></PrivateLayout>} />
 
           <Route path="*" element={<Navigate to="/dashboard" replace />} />

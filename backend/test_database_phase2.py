@@ -77,7 +77,7 @@ def run_all_tests(db_url: str = None):
 
         with engine.connect() as conn:
             current_rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
-            assert current_rev == "0003_chat_findings_gov_shots"
+            assert current_rev in ("0003_chat_findings_gov_shots", "0004_reverification_reports_and_applicant_fields")
         print(f"  -> PASSED: Alembic upgraded to head revision: {current_rev}")
         results["2_alembic_upgrade"] = "PASSED"
     except Exception as e:

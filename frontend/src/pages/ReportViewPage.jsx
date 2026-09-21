@@ -271,6 +271,10 @@ export default function ReportViewPage() {
             <ArrowLeft className="w-4 h-4" /> Back to Reports
           </button>
           <div className="flex gap-2 flex-wrap">
+            <button onClick={() => navigate(`/report/${appId}/review`)}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl border border-primary-300 bg-primary-50 text-primary-800 text-sm font-semibold hover:bg-primary-100 transition shadow-sm">
+              <FileText className="w-4 h-4 text-primary-700" /> Review & Edit Report
+            </button>
             <button onClick={handlePrint}
               className="btn-secondary flex items-center gap-2">
               <Printer className="w-4 h-4" /> Print

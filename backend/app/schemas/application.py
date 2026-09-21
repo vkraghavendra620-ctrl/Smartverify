@@ -45,6 +45,8 @@ class ApplicationCreate(BaseModel):
     gender: Optional[str] = None
     address: Optional[str] = None
     father_name: Optional[str] = None
+    applicant_mobile: Optional[str] = None
+    applicant_email: Optional[str] = None
 
 class ApplicantDetailsUpdate(BaseModel):
     applicant_name: Optional[str] = None
@@ -54,21 +56,43 @@ class ApplicantDetailsUpdate(BaseModel):
     gender: Optional[str] = None
     address: Optional[str] = None
     father_name: Optional[str] = None
+    applicant_mobile: Optional[str] = None
+    applicant_email: Optional[str] = None
 
 class JointApplicantCreate(BaseModel):
     index: int
+    name: Optional[str] = None
+    applicant_type: Optional[str] = "co_applicant"
     relationship: Optional[str] = None
+    pan_number: Optional[str] = None
+    aadhaar_number: Optional[str] = None
+    dob: Optional[str] = None
+    address: Optional[str] = None
     mobile: Optional[str] = None
     email: Optional[str] = None
+    income: Optional[float] = None
+    occupation: Optional[str] = None
+    father_name: Optional[str] = None
+    years_in_occupation: Optional[int] = None
     remarks: Optional[str] = None
 
 class JointApplicantOut(BaseModel):
     id: int
     application_id: int
     index: int
+    name: Optional[str] = None
+    applicant_type: Optional[str] = "co_applicant"
     relationship: Optional[str] = Field(None, validation_alias="relationship_type")
+    pan_number: Optional[str] = None
+    aadhaar_number: Optional[str] = None
+    dob: Optional[str] = None
+    address: Optional[str] = None
     mobile: Optional[str]
     email: Optional[str]
+    income: Optional[float] = None
+    occupation: Optional[str] = None
+    father_name: Optional[str] = None
+    years_in_occupation: Optional[int] = None
     remarks: Optional[str]
     created_at: datetime
     class Config:
@@ -144,6 +168,8 @@ class ApplicationOut(BaseModel):
     gender: Optional[str] = None
     address: Optional[str] = None
     father_name: Optional[str] = None
+    applicant_mobile: Optional[str] = None
+    applicant_email: Optional[str] = None
     branch: Optional[str]
     loan_type: Optional[str]
     loan_amount: float

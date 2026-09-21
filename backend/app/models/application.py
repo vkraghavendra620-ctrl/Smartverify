@@ -30,6 +30,8 @@ class Application(Base):
     gender         = Column(String(50), nullable=True)
     address        = Column(String(500), nullable=True)
     father_name    = Column(String(255), nullable=True)
+    applicant_mobile = Column(String(20), nullable=True)
+    applicant_email  = Column(String(255), nullable=True)
     
     status         = Column(SAEnum(ApplicationStatus, native_enum=False), default=ApplicationStatus.pending)
     created_at     = Column(DateTime, default=datetime.utcnow)
@@ -48,6 +50,7 @@ class Application(Base):
     findings = relationship("ApplicationFinding", back_populates="application", cascade="all, delete-orphan")
     gov_screenshots = relationship("GovernmentVerificationScreenshot", back_populates="application", cascade="all, delete-orphan")
     verification_results = relationship("VerificationResult", back_populates="application", cascade="all, delete-orphan")
+    reverification_reports = relationship("ReverificationReport", back_populates="application", cascade="all, delete-orphan")
 class SiteVerification(Base):
     __tablename__ = "site_verifications"
     id              = Column(Integer, primary_key=True, index=True)
@@ -72,9 +75,19 @@ class JointApplicant(Base):
     id             = Column(Integer, primary_key=True, index=True)
     application_id = Column(Integer, ForeignKey("applications.id", ondelete="CASCADE"), nullable=False)
     index          = Column(Integer, nullable=False)
+    name           = Column(String(255), nullable=True)
+    applicant_type = Column(String(50), default="co_applicant", nullable=False)  # 'co_applicant', 'guarantor'
     relationship_type   = Column(String(100), nullable=True)
+    pan_number     = Column(String(20), nullable=True)
+    aadhaar_number = Column(String(20), nullable=True)
+    dob            = Column(String(50), nullable=True)
+    address        = Column(String(500), nullable=True)
     mobile         = Column(String(20), nullable=True)
     email          = Column(String(255), nullable=True)
+    income         = Column(Float, nullable=True)
+    occupation     = Column(String(255), nullable=True)
+    father_name    = Column(String(255), nullable=True)
+    years_in_occupation = Column(Integer, nullable=True)
     remarks        = Column(String(1000), nullable=True)
     created_at     = Column(DateTime, default=datetime.utcnow)
     

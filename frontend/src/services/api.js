@@ -58,6 +58,10 @@ export const getReport       = (appId) => api.get(`/report/${appId}`);
 export const downloadReport  = (appId) => `${API_URL}/report/${appId}/download`;
 export const downloadPDF     = (appId) => api.get(`/report/${appId}/download`, { responseType: 'blob' });
 export const regeneratePdf   = (appId) => api.post(`/report/${appId}/regenerate-pdf`);
+export const getReportReview = (appId) => api.get(`/report/${appId}/review`);
+export const editParticularReview = (appId, data) => api.post(`/report/${appId}/review/edit`, data);
+export const toggleEvidenceSelection = (appId, data) => api.post(`/report/${appId}/review/evidence`, data);
+export const revalidateReportReview = (appId) => api.post(`/report/${appId}/review/revalidate`);
 
 // ── Dashboard ─────────────────────────────────────────────────────────────
 export const getDashboardStats = (branch = "") => api.get(`/dashboard/stats${branch ? `?branch=${encodeURIComponent(branch)}` : ""}`);

@@ -50,6 +50,7 @@ app.include_router(verification.router, prefix="/verify",       tags=["Verificat
 app.include_router(applications.router, prefix="/applications", tags=["Applications"])
 app.include_router(dashboard.router,    prefix="/dashboard",    tags=["Dashboard"])
 app.include_router(reports.router,      prefix="/report",       tags=["Reports"])
+app.include_router(reports.router,      prefix="/api/reports",  tags=["Reports"])
 
 
 @app.get("/health", tags=["Health"])
