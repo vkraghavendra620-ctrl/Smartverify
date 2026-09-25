@@ -379,11 +379,13 @@ export default function GovVerificationPage() {
   const [data, setData]         = useState({ ...INITIAL_STATE });
   const [isSaving, setIsSaving] = useState(false);
 
-  // Application selection state (preserved across navigation and refresh)
+  // Application selection state.
+  // NOTE: intentionally NOT restored from localStorage on mount — every fresh
+  // page load/app start must begin with no application selected (and therefore
+  // no screenshots/OCR data shown) until the user explicitly picks or is
+  // routed to a specific application. See routeAppId handling below.
   const [apps, setApps]                   = useState([]);
-  const [selectedAppId, setSelectedAppId] = useState(() => {
-    return routeAppId || localStorage.getItem('gov_active_app_id') || '';
-  });
+  const [selectedAppId, setSelectedAppId] = useState(routeAppId || '');
 
   // OCR-extracted values
   const [panNumber,           setPanNumber]           = useState('');
@@ -416,21 +418,19 @@ export default function GovVerificationPage() {
   const [panOcrText,            setPanOcrText]            = useState('');
   const [panNameConfidence,     setPanNameConfidence]     = useState(null);
 
-  // 1. Fetch applications list on mount
+  // 1. Fetch applications list on mount.
+  // Only auto-select an application when the URL explicitly names one
+  // (routeAppId) — e.g. navigating in from the Applications list. A bare
+  // page load/refresh with no routeAppId must NOT auto-pick an application,
+  // so the page starts empty (dropdown on "— Select an application —") with
+  // no screenshots or OCR data until the user chooses one themselves.
   useEffect(() => {
     getApplications()
       .then((r) => {
         const list = r.data || [];
         setApps(list);
-        if (list.length > 0) {
-          const savedId = localStorage.getItem('gov_active_app_id');
-          if (routeAppId) {
-            setSelectedAppId(String(routeAppId));
-          } else if (savedId && list.some(a => String(a.id) === String(savedId))) {
-            setSelectedAppId(String(savedId));
-          } else if (!selectedAppId) {
-            setSelectedAppId(String(list[0].id));
-          }
+        if (routeAppId) {
+          setSelectedAppId(String(routeAppId));
         }
       })
       .catch((err) => console.error('Failed to load applications', err));
@@ -447,9 +447,9 @@ export default function GovVerificationPage() {
   useEffect(() => {
     if (!selectedAppId) return;
 
-    localStorage.setItem('gov_active_app_id', String(selectedAppId));
-
-    // A. INSTANT RESTORE from localStorage
+    // A. INSTANT RESTORE from localStorage (per-application cache, used only
+    // when the user has explicitly selected/navigated to this application —
+    // not on a fresh app start, since selectedAppId is never auto-restored)
     const cached = loadGovCache(selectedAppId);
     if (cached) {
       setData(prev => ({
