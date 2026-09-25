@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Download, FileText, Bot, Cpu } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Download, FileText, Bot, Cpu, FileEdit, Sparkles } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getApplications, getReport, downloadPDF } from '../services/api';
 import StatusBadge from '../components/ui/StatusBadge';
@@ -7,6 +8,7 @@ import LoadingSpinner from '../components/ui/LoadingSpinner';
 import { formatDate, formatCurrency } from '../utils/formatters';
 
 export default function ReportsPage() {
+  const navigate              = useNavigate();
   const [apps, setApps]       = useState([]);
   const [reports, setReports] = useState({});
   const [loading, setLoading] = useState(true);
@@ -15,11 +17,11 @@ export default function ReportsPage() {
   useEffect(() => {
     getApplications()
       .then(async (r) => {
-        const verifiedApps = r.data.filter((a) => a.status !== 'pending');
-        setApps(verifiedApps);
+        const allApps = r.data || [];
+        setApps(allApps);
         const reportMap = {};
         await Promise.all(
-          verifiedApps.map((a) =>
+          allApps.map((a) =>
             getReport(a.id)
               .then((rr) => { reportMap[a.id] = rr.data; })
               .catch(() => {})
@@ -54,8 +56,8 @@ export default function ReportsPage() {
       {apps.length === 0 ? (
         <div className='card text-center py-16'>
           <FileText className='w-12 h-12 text-slate-300 mx-auto mb-3' />
-          <p className='text-slate-500'>No verified applications yet.</p>
-          <p className='text-sm text-slate-400 mt-1'>Run verification to generate reports.</p>
+          <p className='text-slate-500'>No applications found.</p>
+          <p className='text-sm text-slate-400 mt-1'>Create an application to generate or review reports.</p>
         </div>
       ) : apps.map((app) => {
         const report = reports[app.id];
@@ -68,9 +70,13 @@ export default function ReportsPage() {
               onClick={() => setExpandedId(isExpanded ? null : app.id)}
             >
               <div className='flex-1'>
-                <div className='flex items-center gap-3 mb-2'>
+                <div className='flex items-center gap-3 mb-2 flex-wrap'>
                   <p className='font-semibold'>#{app.id} – {app.applicant_name || 'Unnamed'}</p>
                   <StatusBadge status={app.status} />
+                  <span className='inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-200'>
+                    <Sparkles className='w-3 h-3 text-indigo-500' />
+                    Report Review Available
+                  </span>
                   {report?.verification_mode && (
                     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
                       report.verification_mode === 'agentic' ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-600'
@@ -104,10 +110,16 @@ export default function ReportsPage() {
                 )}
               </div>
               <div className='flex items-center gap-3'>
+                <button 
+                  onClick={(e) => { e.stopPropagation(); navigate(`/report/${app.id}/review`); }}
+                  className='btn-primary flex items-center gap-2 whitespace-nowrap shadow-sm'
+                >
+                  <FileEdit className='w-4 h-4' /> Review &amp; Edit Report
+                </button>
                 {report?.pdf_path && (
                   <button 
                     onClick={(e) => { e.stopPropagation(); handleDownload(app.id); }}
-                    className='btn-primary flex items-center gap-2 whitespace-nowrap'
+                    className='btn-secondary flex items-center gap-2 whitespace-nowrap'
                   >
                     <Download className='w-4 h-4' /> Download PDF
                   </button>

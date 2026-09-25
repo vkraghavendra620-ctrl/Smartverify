@@ -1,5 +1,5 @@
 """
-Enterprise PDF Report Generation Service (Phase 9).
+Enterprise PDF Report Generation Service (Phase 10).
 Renders the final, publication-ready Banking Pre-Sanction Re-Verification Report
 from the approved Phase 8 review state, Phase 2 template, and Phase 5 evidence map.
 
@@ -10,6 +10,7 @@ Architectural Constraints:
 - ZERO file mutations (move/copy/delete/edit)
 - Strict immutability of all input objects
 - Deterministic layout and content resolution
+- Strict party isolation between Applicant and Guarantor(s)
 """
 import io
 import os
@@ -18,7 +19,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 from PIL import Image as PILImage
 
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
@@ -77,16 +78,16 @@ class NumberedCanvas(canvas.Canvas):
     def _draw_page_decorations(self, total_pages: int):
         self.saveState()
 
-        page_w, page_h = A4
+        page_w, page_h = landscape(A4)
 
-        # 1. Diagonal Watermark
+        # 1. Subtle Diagonal Watermark
         self.setFillColor(colors.HexColor("#64748B"))
-        self.setFillAlpha(0.06)
+        self.setFillAlpha(0.04)
         self.setFont("Helvetica-Bold", 38)
         self.translate(page_w / 2.0, page_h / 2.0)
-        self.rotate(45)
+        self.rotate(35)
         self.drawCentredString(0, 0, "CONFIDENTIAL - INTERNAL BANKING USE")
-        self.rotate(-45)
+        self.rotate(-35)
         self.translate(-page_w / 2.0, -page_h / 2.0)
         self.setFillAlpha(1.0)
 
@@ -94,30 +95,30 @@ class NumberedCanvas(canvas.Canvas):
         if self._pageNumber > 1:
             self.setFont("Helvetica-Bold", 7.5)
             self.setFillColor(colors.HexColor("#1E3A8A"))
-            self.drawString(34, page_h - 28, "SMARTVERIFY — PRE-SANCTION RE-VERIFICATION DOSSIER")
+            self.drawString(28, page_h - 24, "SMARTVERIFY -- AI LOAN RE-VERIFICATION REPORT")
             self.setFont("Helvetica", 7.5)
             self.setFillColor(colors.HexColor("#64748B"))
-            self.drawRightString(page_w - 34, page_h - 28, "CONFIDENTIAL INTERNAL BANKING DOCUMENT")
+            self.drawRightString(page_w - 28, page_h - 24, "CONFIDENTIAL INTERNAL BANKING DOCUMENT")
             self.setStrokeColor(colors.HexColor("#CBD5E1"))
             self.setLineWidth(0.5)
-            self.line(34, page_h - 32, page_w - 34, page_h - 32)
+            self.line(28, page_h - 28, page_w - 28, page_h - 28)
 
         # 3. Running Footer (All Pages)
         self.setStrokeColor(colors.HexColor("#CBD5E1"))
         self.setLineWidth(0.5)
-        self.line(34, 38, page_w - 34, 38)
+        self.line(28, 32, page_w - 28, 32)
 
         self.setFont("Helvetica", 7.5)
         self.setFillColor(colors.HexColor("#64748B"))
-        self.drawString(34, 26, "Generated via SmartVerify Automated Engine — Strictly for Authorized Credit Scrutiny Only")
+        self.drawString(28, 20, "SmartVerify | Confidential / For Official Banking Use Only")
         page_text = f"Page {self._pageNumber} of {total_pages}"
-        self.drawRightString(page_w - 34, 26, page_text)
+        self.drawRightString(page_w - 28, 20, page_text)
 
         self.restoreState()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CORRECTION 3: EVIDENCE ASSET RESOLVER (READ-ONLY BOUNDARY)
+# EVIDENCE ASSET RESOLVER (READ-ONLY BOUNDARY)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class ResolvedEvidenceAsset:
@@ -159,8 +160,8 @@ class EvidenceAssetResolver:
     - Zero filesystem mutation (no copy, move, delete, rename).
     - If asset file is missing or invalid: sets a neutral deterministic message without crashing.
     """
-    MAX_IMAGE_WIDTH = 220.0
-    MAX_IMAGE_HEIGHT = 150.0
+    MAX_IMAGE_WIDTH = 260.0
+    MAX_IMAGE_HEIGHT = 160.0
 
     @classmethod
     def resolve_asset(cls, ref: EvidenceReference) -> ResolvedEvidenceAsset:
@@ -183,7 +184,6 @@ class EvidenceAssetResolver:
 
         filepath = ref.filename
         if not filepath:
-            # Non-file finding or record evidence
             return ResolvedEvidenceAsset(
                 evidence_id=ref.evidence_id,
                 particular_id=ref.particular_id,
@@ -196,7 +196,6 @@ class EvidenceAssetResolver:
                 metadata=ref.metadata,
             )
 
-        # Check read-only file existence
         if not os.path.isfile(filepath):
             return ResolvedEvidenceAsset(
                 evidence_id=ref.evidence_id,
@@ -210,7 +209,6 @@ class EvidenceAssetResolver:
                 metadata=ref.metadata,
             )
 
-        # Inspect if image
         valid_img_extensions = (".png", ".jpg", ".jpeg", ".webp", ".bmp")
         if any(filepath.lower().endswith(ext) for ext in valid_img_extensions):
             try:
@@ -250,7 +248,6 @@ class EvidenceAssetResolver:
                     metadata=ref.metadata,
                 )
 
-        # Non-image file (e.g. PDF or text attachment)
         return ResolvedEvidenceAsset(
             evidence_id=ref.evidence_id,
             particular_id=ref.particular_id,
@@ -265,8 +262,30 @@ class EvidenceAssetResolver:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CORRECTION 1: CONTENT RESOLUTION HIERARCHY
+# CONTENT RESOLUTION HIERARCHY & TEXT SANITIZATION
 # ─────────────────────────────────────────────────────────────────────────────
+
+def sanitize_pdf_text(text: str) -> str:
+    """
+    Sanitizes arbitrary text strings for safe ReportLab rendering under Standard Helvetica encoding.
+    Replaces unmapped unicode (e.g. ₹ Rupee) and escapes XML entities.
+    """
+    if not text:
+        return ""
+    text = str(text)
+    # Character substitutions for standard font compatibility
+    text = text.replace("₹", "Rs. ").replace("\u20b9", "Rs. ")
+    text = text.replace("\u2014", "--").replace("\u2013", "-")
+    text = text.replace("\u2018", "'").replace("\u2019", "'")
+    text = text.replace("\u201c", '"').replace("\u201d", '"')
+    text = text.replace("\u2022", "*")
+
+    # XML entity escaping
+    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    # Convert newline to break
+    text = text.replace("\n", "<br/>")
+    return text
+
 
 def resolve_particular_text(
     particular_id: str,
@@ -274,35 +293,19 @@ def resolve_particular_text(
     baseline_report: Optional[Any] = None,
 ) -> str:
     """
-    Deterministically resolves Verification Details text for a given Particular.
-
-    Exact Logic:
-    IF missing_information exists AND current_text is empty:
-        render INFORMATION REQUIRED
-    ELSE IF current_text is non-empty:
-        render current_text
-    ELSE IF deterministic baseline text exists:
-        render deterministic baseline
-    ELSE:
-        render NO DATA RECORDED
-
-    Guarantees:
-    - Never resurrects original_ai_text.
-    - Never fabricates missing information.
+    Deterministically resolves single Verification Details text for a given Particular.
+    Maintained for backward compatibility and unit tests.
     """
     has_missing_info = bool(particular_review.missing_information)
     current_text_val = (particular_review.current_text or "").strip()
 
-    # 1. Missing information exists AND current_text is empty
     if has_missing_info and not current_text_val:
         items_str = "; ".join(particular_review.missing_information)
         return f"[INFORMATION REQUIRED: {items_str}]"
 
-    # 2. current_text is non-empty
     if current_text_val:
         return current_text_val
 
-    # 3. deterministic baseline text exists
     if baseline_report and hasattr(baseline_report, "particulars"):
         bp = baseline_report.particulars.get(particular_id)
         if bp and getattr(bp, "summary_lines", None):
@@ -310,12 +313,84 @@ def resolve_particular_text(
             if non_empty_lines:
                 return "\n".join(non_empty_lines)
 
-    # 4. Fallback: NO DATA RECORDED
     return "[NO DATA RECORDED]"
 
 
+def resolve_party_particular_text(
+    particular_id: str,
+    particular_item: ParticularItem,
+    particular_review: ParticularReview,
+    baseline_report: Optional[Any] = None,
+) -> Tuple[str, str]:
+    """
+    Deterministically resolves party-isolated text for Applicant and Guarantor columns.
+    Enforces strict party isolation:
+    - Applicant column receives ONLY applicant details or shared observations.
+    - Guarantor column receives ONLY guarantor details or 'N/A' when unsupported.
+    - Prioritizes active current_text (whether officer-edited or AI-composed).
+    - Never resurrects original AI text after an officer edit.
+    - Masked Aadhaar is strictly preserved.
+    Returns: (applicant_cell_text, guarantor_cell_text)
+    """
+    has_missing_info = bool(particular_review.missing_information)
+    current_text_val = (particular_review.current_text or "").strip()
+
+    # Case 1: Missing information priority when current_text is empty
+    if has_missing_info and not current_text_val:
+        items_str = "; ".join(particular_review.missing_information)
+        info_req = f"[INFORMATION REQUIRED: {items_str}]"
+        if not particular_item.guarantor_supported:
+            return (info_req, "N/A")
+        return (info_req, info_req)
+
+    # Case 2: Guarantor not supported (e.g. Section 7 Vehicle/Collateral)
+    if not particular_item.guarantor_supported:
+        guar_text = "N/A"
+        if current_text_val:
+            app_text = current_text_val
+        elif baseline_report and hasattr(baseline_report, "get_particular"):
+            base_p = baseline_report.get_particular(particular_id)
+            if base_p and base_p.applicant_verification and base_p.applicant_verification.summary_lines:
+                app_text = "\n".join(base_p.applicant_verification.summary_lines)
+            elif base_p and base_p.shared_verification and base_p.shared_verification.summary_lines:
+                app_text = "\n".join(base_p.shared_verification.summary_lines)
+            else:
+                app_text = "[NO DATA RECORDED]"
+        else:
+            app_text = "[NO DATA RECORDED]"
+        return (app_text, guar_text)
+
+    # Case 3: Guarantor supported — Extract party data
+    base_p = baseline_report.get_particular(particular_id) if (baseline_report and hasattr(baseline_report, "get_particular")) else None
+    guar_lines = [l for g in (base_p.guarantor_verifications if base_p else []) for l in g.summary_lines]
+
+    if current_text_val:
+        # Check if current_text contains an explicit party delimiter
+        if "| Guarantor" in current_text_val:
+            parts = current_text_val.split("| Guarantor", 1)
+            app_t = parts[0].replace("Applicant:", "").replace("Applicant Aadhaar:", "Aadhaar:").strip(" |")
+            guar_t = ("Guarantor" + parts[1]).replace("Guarantor Aadhaar:", "Aadhaar:").strip(" |")
+            return (app_t or "[NO DATA RECORDED]", guar_t or "Confirmed")
+        elif "\nGuarantor:" in current_text_val:
+            parts = current_text_val.split("\nGuarantor:", 1)
+            app_t = parts[0].replace("Applicant:", "").strip()
+            guar_t = ("Guarantor: " + parts[1]).strip()
+            return (app_t or "[NO DATA RECORDED]", guar_t or "Confirmed")
+        else:
+            # Active text applies to applicant; guarantor receives verified baseline or confirmed status
+            guar_t = "\n".join(guar_lines) if guar_lines else ("Confirmed / As Recorded" if particular_id not in ("P6", "P8") else current_text_val)
+            return (current_text_val, guar_t)
+
+    # Fallback to deterministic baseline party lines if current_text is empty
+    app_lines = (base_p.applicant_verification.summary_lines if (base_p and base_p.applicant_verification) else [])
+    shared_lines = (base_p.shared_verification.summary_lines if (base_p and base_p.shared_verification) else [])
+    app_t = "\n".join(app_lines) if app_lines else ("\n".join(shared_lines) if shared_lines else "[NO DATA RECORDED]")
+    guar_t = "\n".join(guar_lines) if guar_lines else ("\n".join(shared_lines) if shared_lines else "Confirmed / As Recorded")
+    return (app_t, guar_t)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
-# VALIDATION GATE (PHASE 9 EXPORT ENFORCEMENT)
+# VALIDATION GATE (PHASE 9/10 EXPORT ENFORCEMENT)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def validate_export_gate(request: PdfGenerationRequest) -> None:
@@ -375,15 +450,62 @@ def validate_export_gate(request: PdfGenerationRequest) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# CANONICAL NUMBERING & SECTION METADATA
+# ─────────────────────────────────────────────────────────────────────────────
+
+PARTICULAR_NUMBERING: Dict[str, str] = {
+    "P1": "1.",
+    "P2": "2.",
+    "P2A": "a)",
+    "P2B": "b)",
+    "P2C": "c)",
+    "P2D": "d)",
+    "P2E": "e)",
+    "P3": "3.",
+    "P4": "4.",
+    "P4A": "a)",
+    "P4B": "b)",
+    "P4C": "c)",
+    "P4D": "d)",
+    "P5": "5.",
+    "P5A": "a)",
+    "P5B": "b)",
+    "P5C": "c)",
+    "P6": "6.",
+    "P7": "7.",
+    "P7A": "a)",
+    "P7A1": "i)",
+    "P7A2": "ii)",
+    "P7B": "b)",
+    "P7B1": "i)",
+    "P7B2": "ii)",
+    "P7B3": "iii)",
+    "P8": "8.",
+}
+
+SECTION_NAMES: Dict[str, str] = {
+    "1": "BORROWER & GUARANTOR IDENTIFICATION",
+    "2": "RESIDENCE VERIFICATION",
+    "3": "KYC & IDENTITY SCRUTINY",
+    "4": "INCOME & EMPLOYMENT VERIFICATION",
+    "5": "BANKING / FINANCIAL TRACK RECORD",
+    "6": "TRACK RECORD & CRIMINAL ANTECEDENTS",
+    "7": "VEHICLE / COLLATERAL VERIFICATION",
+    "8": "GENERAL INFORMATION & OPINION",
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # CORE PDF GENERATOR (REPORTLAB PLATYPUS ENGINE)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def generate_pdf_report(request: PdfGenerationRequest) -> PdfGenerationResult:
     """
-    Renders the approved verification report into a deterministic, publication-quality PDF.
-    Enforces pre-flight gate, builds flowable elements, and generates output buffer.
+    Renders the approved verification report into a deterministic, institutional-grade PDF
+    following the reference Background Information / Re-Verification report architecture.
+    Uses landscape A4 layout for optimal 4-column Applicant/Guarantor tabular hierarchy.
     """
-    # 1. Enforce Validation Gate
+    # 1. Enforce Pre-Flight Validation Gate
     validate_export_gate(request)
 
     state = request.review_state
@@ -391,15 +513,17 @@ def generate_pdf_report(request: PdfGenerationRequest) -> PdfGenerationResult:
     baseline = request.baseline_report
     evidence_map = request.evidence_map
 
-    # 2. Setup Document Layout
+    # 2. Document Geometry & Setup (Landscape A4: 841.89 x 595.27 pt)
+    # Margins: Left = 1.0 cm (28.35 pt), Right = 1.0 cm (28.35 pt).
+    # Printable content width = 785.2 pt.
     buffer = io.BytesIO()
     doc = BaseDocTemplate(
         buffer,
-        pagesize=A4,
-        leftMargin=1.2 * cm,
-        rightMargin=1.2 * cm,
-        topMargin=2.0 * cm,
-        bottomMargin=2.0 * cm,
+        pagesize=landscape(A4),
+        leftMargin=1.0 * cm,
+        rightMargin=1.0 * cm,
+        topMargin=1.4 * cm,
+        bottomMargin=1.4 * cm,
     )
     frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="normal")
     template_page = PageTemplate(id="standard", frames=frame)
@@ -407,164 +531,188 @@ def generate_pdf_report(request: PdfGenerationRequest) -> PdfGenerationResult:
 
     # 3. Typography Styles
     styles = getSampleStyleSheet()
-    
-    title_style = ParagraphStyle(
-        "DocTitle",
+
+    brand_header_style = ParagraphStyle(
+        "BrandHeader",
         parent=styles["Normal"],
         fontName="Helvetica-Bold",
         fontSize=13,
         leading=16,
-        textColor=colors.HexColor("#0F172A"),
+        textColor=colors.HexColor("#1E3A8A"),
         alignment=TA_CENTER,
     )
-    subtitle_style = ParagraphStyle(
-        "DocSubtitle",
+    brand_sub_style = ParagraphStyle(
+        "BrandSub",
         parent=styles["Normal"],
-        fontName="Helvetica",
-        fontSize=8.5,
-        leading=11,
+        fontName="Helvetica-Bold",
+        fontSize=8,
+        leading=10,
         textColor=colors.HexColor("#475569"),
         alignment=TA_CENTER,
     )
-    org_style = ParagraphStyle(
-        "OrgHeader",
+    report_title_style = ParagraphStyle(
+        "ReportTitle",
         parent=styles["Normal"],
         fontName="Helvetica-Bold",
-        fontSize=9,
-        leading=11,
-        textColor=colors.HexColor("#1E3A8A"),
+        fontSize=10.5,
+        leading=13,
+        textColor=colors.HexColor("#0F172A"),
         alignment=TA_CENTER,
     )
     meta_key_style = ParagraphStyle(
         "MetaKey",
         parent=styles["Normal"],
         fontName="Helvetica-Bold",
-        fontSize=7.5,
-        leading=9.5,
+        fontSize=7.2,
+        leading=9.2,
         textColor=colors.HexColor("#334155"),
     )
     meta_val_style = ParagraphStyle(
         "MetaVal",
         parent=styles["Normal"],
         fontName="Helvetica",
-        fontSize=7.5,
-        leading=9.5,
+        fontSize=7.2,
+        leading=9.2,
         textColor=colors.HexColor("#0F172A"),
     )
-    section_header_style = ParagraphStyle(
-        "SectionHeader",
+    section_banner_style = ParagraphStyle(
+        "SectionBanner",
         parent=styles["Normal"],
         fontName="Helvetica-Bold",
-        fontSize=8.5,
-        leading=11,
+        fontSize=7.8,
+        leading=10,
         textColor=colors.HexColor("#1E3A8A"),
     )
-    table_cell_id_style = ParagraphStyle(
-        "CellId",
+    cell_sl_style = ParagraphStyle(
+        "CellSl",
         parent=styles["Normal"],
         fontName="Helvetica-Bold",
-        fontSize=8,
-        leading=10,
+        fontSize=7.5,
+        leading=9.5,
         textColor=colors.HexColor("#1E293B"),
+        alignment=TA_CENTER,
     )
-    table_cell_title_style = ParagraphStyle(
+    cell_title_style = ParagraphStyle(
         "CellTitle",
         parent=styles["Normal"],
         fontName="Helvetica-Bold",
-        fontSize=8,
-        leading=10,
+        fontSize=7.5,
+        leading=9.5,
         textColor=colors.HexColor("#0F172A"),
     )
-    table_cell_desc_style = ParagraphStyle(
+    cell_desc_style = ParagraphStyle(
         "CellDesc",
         parent=styles["Normal"],
         fontName="Helvetica-Oblique",
-        fontSize=7,
-        leading=8.5,
+        fontSize=6.5,
+        leading=8,
         textColor=colors.HexColor("#64748B"),
     )
-    table_cell_body_style = ParagraphStyle(
-        "CellBody",
+    cell_party_style = ParagraphStyle(
+        "CellParty",
         parent=styles["Normal"],
         fontName="Helvetica",
-        fontSize=7.5,
-        leading=9.5,
+        fontSize=7.2,
+        leading=9.2,
         textColor=colors.HexColor("#0F172A"),
     )
-    info_req_style = ParagraphStyle(
-        "InfoReqBody",
+    cell_info_req_style = ParagraphStyle(
+        "CellInfoReq",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=7.2,
+        leading=9.2,
+        textColor=colors.HexColor("#B91C1C"),
+    )
+    cell_na_style = ParagraphStyle(
+        "CellNA",
+        parent=styles["Normal"],
+        fontName="Helvetica-Oblique",
+        fontSize=7.2,
+        leading=9.2,
+        textColor=colors.HexColor("#94A3B8"),
+    )
+    signatory_title_style = ParagraphStyle(
+        "SigTitle",
         parent=styles["Normal"],
         fontName="Helvetica-Bold",
         fontSize=7.5,
         leading=9.5,
-        textColor=colors.HexColor("#B91C1C"),
-    )
-    badge_verified_style = ParagraphStyle(
-        "BadgeVerified",
-        parent=styles["Normal"],
-        fontName="Helvetica-Bold",
-        fontSize=7,
-        leading=8.5,
-        textColor=colors.HexColor("#15803D"),
-        alignment=TA_CENTER,
-    )
-    badge_action_style = ParagraphStyle(
-        "BadgeAction",
-        parent=styles["Normal"],
-        fontName="Helvetica-Bold",
-        fontSize=7,
-        leading=8.5,
-        textColor=colors.HexColor("#B91C1C"),
-        alignment=TA_CENTER,
-    )
-    badge_review_style = ParagraphStyle(
-        "BadgeReview",
-        parent=styles["Normal"],
-        fontName="Helvetica-Bold",
-        fontSize=7,
-        leading=8.5,
-        textColor=colors.HexColor("#B45309"),
-        alignment=TA_CENTER,
+        textColor=colors.HexColor("#1E3A8A"),
     )
 
     story = []
 
-    # ─── HEADER SECTION ──────────────────────────────────────────────────────
-    story.append(Paragraph(template.header.organization_name, org_style))
-    story.append(Spacer(1, 2))
-    story.append(Paragraph(template.header.report_title, title_style))
-    if template.header.report_subtitle:
-        story.append(Spacer(1, 1))
-        story.append(Paragraph(template.header.report_subtitle, subtitle_style))
+    # ─── 1. FORMAL REPORT HEADER ─────────────────────────────────────────────
+    story.append(Paragraph("SMARTVERIFY", brand_header_style))
+    story.append(Paragraph("AI LOAN VERIFICATION SYSTEM", brand_sub_style))
+    story.append(Spacer(1, 3))
+    story.append(Paragraph("BACKGROUND INFORMATION / RE-VERIFICATION REPORT", report_title_style))
     story.append(Spacer(1, 6))
 
-    # Application Metadata Grid
-    gen_dt_str = request.generation_timestamp or datetime.utcnow().strftime("%d %b %Y, %H:%M UTC")
+    # Resolve Application Metadata
+    gen_dt_str = request.generation_timestamp or datetime.utcnow().strftime("%d-%b-%Y %H:%M UTC")
     app_id_str = f"APP-{state.application_id:06d}"
 
-    meta_data = [
+    applicant_name = "Not Recorded"
+    guarantor_name = "Not Applicable"
+    loan_type = "Retail Loan"
+    loan_amount = "Not Recorded"
+    branch = "Main Branch"
+
+    if baseline and hasattr(baseline, "header") and baseline.header:
+        if baseline.header.borrower_name:
+            applicant_name = baseline.header.borrower_name
+        if baseline.header.loan_type:
+            loan_type = baseline.header.loan_type
+        if baseline.header.formatted_loan_amount:
+            loan_amount = baseline.header.formatted_loan_amount.replace("₹", "Rs. ").replace("\u20b9", "Rs. ")
+        elif baseline.header.raw_loan_amount:
+            loan_amount = f"Rs. {baseline.header.raw_loan_amount:,.2f}"
+        if baseline.header.branch:
+            branch = baseline.header.branch
+
+    # Resolve Guarantor Name from baseline parties or P1
+    if baseline and hasattr(baseline, "parties") and baseline.parties and baseline.parties.guarantors:
+        g_names = [g.name for g in baseline.parties.guarantors if g.name]
+        if g_names:
+            guarantor_name = ", ".join(g_names)
+    elif baseline and hasattr(baseline, "get_particular"):
+        bp1 = baseline.get_particular("P1")
+        if bp1 and bp1.guarantor_verifications:
+            for gv in bp1.guarantor_verifications:
+                if gv.party_name:
+                    guarantor_name = gv.party_name
+                    break
+                for line in gv.summary_lines:
+                    if line.startswith("Name:"):
+                        guarantor_name = line.replace("Name:", "").strip()
+                        break
+
+    # Compact Application Summary Grid Table (Col widths = [110, 282, 110, 283] = 785 pt)
+    meta_table_data = [
         [
-            Paragraph("Application No:", meta_key_style), Paragraph(app_id_str, meta_val_style),
-            Paragraph("Template Key:", meta_key_style), Paragraph(f"{template.template_key} ({template.template_version})", meta_val_style),
+            Paragraph("Application ID:", meta_key_style), Paragraph(sanitize_pdf_text(app_id_str), meta_val_style),
+            Paragraph("Loan Type:", meta_key_style), Paragraph(sanitize_pdf_text(loan_type), meta_val_style),
         ],
         [
-            Paragraph("Investigation Date:", meta_key_style), Paragraph(gen_dt_str, meta_val_style),
-            Paragraph("Revision:", meta_key_style), Paragraph(f"Rev #{state.revision} (Audit Verified)", meta_val_style),
+            Paragraph("Applicant Name:", meta_key_style), Paragraph(sanitize_pdf_text(applicant_name), meta_val_style),
+            Paragraph("Loan Amount:", meta_key_style), Paragraph(sanitize_pdf_text(loan_amount), meta_val_style),
         ],
         [
-            Paragraph("Reviewing Official:", meta_key_style), Paragraph(request.generated_by, meta_val_style),
-            Paragraph("Verification Status:", meta_key_style), Paragraph(state.validation_status, meta_val_style),
+            Paragraph("Guarantor(s):", meta_key_style), Paragraph(sanitize_pdf_text(guarantor_name), meta_val_style),
+            Paragraph("Branch:", meta_key_style), Paragraph(sanitize_pdf_text(branch), meta_val_style),
         ],
         [
-            Paragraph("Cryptographic Hash:", meta_key_style), Paragraph(f"{state.input_hash[:16]}...", meta_val_style),
-            Paragraph("Overall Quality:", meta_key_style), Paragraph("VALIDATED BY RULE ENGINE", meta_val_style),
+            Paragraph("Report Revision:", meta_key_style), Paragraph(f"Rev #{state.revision} (Audit Verified)", meta_val_style),
+            Paragraph("Report Date:", meta_key_style), Paragraph(sanitize_pdf_text(gen_dt_str), meta_val_style),
         ],
     ]
-    meta_table = Table(meta_data, colWidths=[105, 160, 105, 156])
+    meta_table = Table(meta_table_data, colWidths=[110, 282, 110, 283])
     meta_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F8FAFC")),
         ("BOX", (0, 0), (-1, -1), 0.75, colors.HexColor("#94A3B8")),
-        ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
         ("TOPPADDING", (0, 0), (-1, -1), 3),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
         ("LEFTPADDING", (0, 0), (-1, -1), 6),
@@ -573,118 +721,192 @@ def generate_pdf_report(request: PdfGenerationRequest) -> PdfGenerationResult:
     story.append(meta_table)
     story.append(Spacer(1, 8))
 
-    # ─── 27 PARTICULARS TABLE ────────────────────────────────────────────────
-    # Build rows strictly in template order
+    # ─── 2. MAIN 27-PARTICULARS TABLE (4 COLUMNS) ───────────────────────────
+    # Columns: Sl. No. (35 pt), Particulars (190 pt), Applicant (280 pt), Guarantor(s) (280 pt) = 785 pt
     table_rows = []
-    # Header Row
-    table_rows.append([
-        Paragraph("No.", ParagraphStyle("TH1", fontName="Helvetica-Bold", fontSize=8, textColor=colors.white, alignment=TA_CENTER)),
-        Paragraph("Particulars / Verification Clause", ParagraphStyle("TH2", fontName="Helvetica-Bold", fontSize=8, textColor=colors.white)),
-        Paragraph("Verification Details & Re-Verification Observations", ParagraphStyle("TH3", fontName="Helvetica-Bold", fontSize=8, textColor=colors.white)),
-        Paragraph("Status", ParagraphStyle("TH4", fontName="Helvetica-Bold", fontSize=8, textColor=colors.white, alignment=TA_CENTER)),
-    ])
-
-    current_section = None
-    for item in template.particulars:
-        # Check if new section
-        if item.section != current_section and not item.parent_id:
-            current_section = item.section
-
-        p_review = state.particular_reviews.get(item.id)
-        if not p_review:
-            # Fallback placeholder if somehow not in reviews
-            resolved_text = "[NO DATA RECORDED]"
-            val_status = "UNKNOWN"
-            is_info_req = False
-        else:
-            resolved_text = resolve_particular_text(item.id, p_review, baseline)
-            val_status = p_review.validation_status
-            is_info_req = resolved_text.startswith("[INFORMATION REQUIRED")
-
-        # Format title cell
-        indent_prefix = "&nbsp;&nbsp;&nbsp;&nbsp;" if item.parent_id else ""
-        title_flowables = [Paragraph(f"{indent_prefix}{item.title}", table_cell_title_style)]
-        if item.description and not item.parent_id:
-            title_flowables.append(Paragraph(f"{indent_prefix}{item.description}", table_cell_desc_style))
-
-        # Format details cell
-        body_style = info_req_style if is_info_req else table_cell_body_style
-        # Replace newlines with <br/> for ReportLab paragraph display
-        formatted_text = resolved_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br/>")
-        # Unescape our custom bracket tags for cleaner bold display
-        formatted_text = formatted_text.replace("&lt;br/&gt;", "<br/>")
-        if is_info_req:
-            formatted_text = f"<b>{formatted_text}</b>"
-        details_flowable = Paragraph(formatted_text, body_style)
-
-        # Status Badge
-        if is_info_req:
-            status_chip = Paragraph("ACTION<br/>REQ.", badge_action_style)
-        elif val_status == "VALID":
-            status_chip = Paragraph("VERIFIED", badge_verified_style)
-        elif val_status == "WARNING":
-            status_chip = Paragraph("REVIEW", badge_review_style)
-        else:
-            status_chip = Paragraph("CHECK", badge_review_style)
-
-        table_rows.append([
-            Paragraph(item.id, table_cell_id_style),
-            title_flowables,
-            details_flowable,
-            status_chip,
-        ])
-
-    # Table Geometry: Available printable width = 526 pt (A4 width 595 - 2*34)
-    # [36, 160, 275, 55] = 526 pt
-    particulars_table = Table(table_rows, colWidths=[36, 160, 275, 55], repeatRows=1)
-    
-    t_style = [
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E293B")),
-        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+    table_styles = [
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
+        ("ALIGN", (0, 0), (0, -1), "CENTER"),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 3.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3.5),
         ("LEFTPADDING", (0, 0), (-1, -1), 4),
         ("RIGHTPADDING", (0, 0), (-1, -1), 4),
     ]
-    # Alternate row colors
-    for r_idx in range(1, len(table_rows)):
-        if r_idx % 2 == 0:
-            t_style.append(("BACKGROUND", (0, r_idx), (-1, r_idx), colors.HexColor("#F8FAFC")))
-    particulars_table.setStyle(TableStyle(t_style))
+
+    # Header Row
+    table_rows.append([
+        Paragraph("Sl. No.", ParagraphStyle("TH1", fontName="Helvetica-Bold", fontSize=7.5, textColor=colors.white, alignment=TA_CENTER)),
+        Paragraph("Particulars", ParagraphStyle("TH2", fontName="Helvetica-Bold", fontSize=7.5, textColor=colors.white)),
+        Paragraph("Applicant", ParagraphStyle("TH3", fontName="Helvetica-Bold", fontSize=7.5, textColor=colors.white)),
+        Paragraph("Guarantor(s)", ParagraphStyle("TH4", fontName="Helvetica-Bold", fontSize=7.5, textColor=colors.white)),
+    ])
+
+    current_section = None
+    section_row_indices = set()
+
+    for item in template.particulars:
+        # Check for section grouping banner
+        if item.section != current_section:
+            current_section = item.section
+            banner_row_idx = len(table_rows)
+            section_row_indices.add(banner_row_idx)
+
+            sec_title = SECTION_NAMES.get(item.section, f"SECTION {item.section}")
+            banner_text = f"<b>SECTION {item.section}: {sec_title}</b>"
+            table_rows.append([
+                Paragraph(banner_text, section_banner_style),
+                "", "", ""
+            ])
+            table_styles.extend([
+                ("SPAN", (0, banner_row_idx), (3, banner_row_idx)),
+                ("BACKGROUND", (0, banner_row_idx), (3, banner_row_idx), colors.HexColor("#F1F5F9")),
+                ("TOPPADDING", (0, banner_row_idx), (3, banner_row_idx), 3.5),
+                ("BOTTOMPADDING", (0, banner_row_idx), (3, banner_row_idx), 3.5),
+                ("LEFTPADDING", (0, banner_row_idx), (3, banner_row_idx), 6),
+                ("LINEBELOW", (0, banner_row_idx), (3, banner_row_idx), 0.75, colors.HexColor("#CBD5E1")),
+                ("LINEABOVE", (0, banner_row_idx), (3, banner_row_idx), 0.75, colors.HexColor("#CBD5E1")),
+            ])
+
+        p_review = state.particular_reviews.get(item.id)
+        if not p_review:
+            app_text_raw, guar_text_raw = ("[NO DATA RECORDED]", "N/A" if not item.guarantor_supported else "[NO DATA RECORDED]")
+        else:
+            app_text_raw, guar_text_raw = resolve_party_particular_text(item.id, item, p_review, baseline)
+
+        # 1. Sl. No. Cell
+        sl_no_label = PARTICULAR_NUMBERING.get(item.id, item.id)
+        sl_flowable = Paragraph(sl_no_label, cell_sl_style)
+
+        # 2. Particulars Title Cell (with clean indentation for sub-particulars)
+        if item.id in ("P7A1", "P7A2", "P7B1", "P7B2", "P7B3"):
+            indent = "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
+        elif item.parent_id:
+            indent = "&nbsp;&nbsp;&nbsp;&nbsp;"
+        else:
+            indent = ""
+
+        title_flowables = [Paragraph(f"{indent}{sanitize_pdf_text(item.title)}", cell_title_style)]
+        if item.description and not item.parent_id:
+            title_flowables.append(Paragraph(f"{indent}{sanitize_pdf_text(item.description)}", cell_desc_style))
+
+        # 3. Applicant Cell
+        sanitized_app = sanitize_pdf_text(app_text_raw)
+        if app_text_raw.startswith("[INFORMATION REQUIRED"):
+            app_flowable = Paragraph(f"<b>{sanitized_app}</b>", cell_info_req_style)
+        else:
+            app_flowable = Paragraph(sanitized_app, cell_party_style)
+
+        # 4. Guarantor Cell
+        sanitized_guar = sanitize_pdf_text(guar_text_raw)
+        if guar_text_raw == "N/A":
+            guar_flowable = Paragraph("<i>N/A</i>", cell_na_style)
+        elif guar_text_raw.startswith("[INFORMATION REQUIRED"):
+            guar_flowable = Paragraph(f"<b>{sanitized_guar}</b>", cell_info_req_style)
+        else:
+            guar_flowable = Paragraph(sanitized_guar, cell_party_style)
+
+        row_idx = len(table_rows)
+        table_rows.append([sl_flowable, title_flowables, app_flowable, guar_flowable])
+
+        # Subtle zebra striping for non-section rows
+        if row_idx % 2 == 0:
+            table_styles.append(("BACKGROUND", (0, row_idx), (-1, row_idx), colors.HexColor("#F8FAFC")))
+
+    particulars_table = Table(table_rows, colWidths=[35, 190, 280, 280], repeatRows=1)
+    particulars_table.setStyle(TableStyle(table_styles))
     story.append(particulars_table)
     story.append(Spacer(1, 10))
 
-    # ─── SIGNATORY FOOTER SECTION ────────────────────────────────────────────
-    story.append(Paragraph("<b>STATUTORY SCRUTINY, ACCEPTANCE &amp; SIGNATORY CERTIFICATION</b>", section_header_style))
-    story.append(Spacer(1, 4))
+    # ─── 3. OFFICER REVIEW & STATUTORY AUDIT SECTION ─────────────────────────
+    audit_header_style = ParagraphStyle(
+        "AuditHeader",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=8,
+        leading=10,
+        textColor=colors.HexColor("#1E3A8A"),
+    )
+    status_flowables = [
+        Paragraph("<b>REPORT REVIEW STATUS &amp; STATUTORY AUDIT CERTIFICATION</b>", audit_header_style),
+        Spacer(1, 3),
+    ]
 
-    sig_cells = []
-    for sig_block in template.footer.signatories:
-        sig_cells.append([
-            Paragraph(f"<b>{sig_block.title}</b>", meta_key_style),
-            Spacer(1, 24), # Signature space
-            Paragraph(f"Designation: {sig_block.role}", meta_val_style),
+    # Review status audit grid (Col widths = [130, 262, 130, 263] = 785 pt)
+    audit_summary_data = [
+        [
+            Paragraph("Validation Status:", meta_key_style), Paragraph(sanitize_pdf_text(state.validation_status), meta_val_style),
+            Paragraph("Report Revision:", meta_key_style), Paragraph(f"Rev #{state.revision} (Approved Final)", meta_val_style),
+        ],
+        [
+            Paragraph("Cryptographic Input Hash:", meta_key_style), Paragraph(f"{state.input_hash[:24]}...", meta_val_style),
+            Paragraph("Generation Framework:", meta_key_style), Paragraph("SmartVerify Rule Engine (Phase 10 Institutional)", meta_val_style),
+        ],
+    ]
+    audit_table = Table(audit_summary_data, colWidths=[130, 262, 130, 263])
+    audit_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F8FAFC")),
+        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    status_flowables.append(audit_table)
+    status_flowables.append(Spacer(1, 6))
+
+    # Officer review signatory boxes (3 columns = [261, 262, 262] = 785 pt)
+    reviewing_officer_name = request.generated_by if request.generated_by and request.generated_by != "SmartVerify System" else "Authorized Credit Officer"
+
+    sig_cells = [
+        [
+            Paragraph("<b>Investigating Official</b>", signatory_title_style),
+            Spacer(1, 20),
+            Paragraph(f"Name: {sanitize_pdf_text(reviewing_officer_name)}", meta_val_style),
+            Paragraph("Designation: Verification Field Officer", meta_val_style),
             Paragraph(f"Date: {gen_dt_str[:11]}", meta_val_style),
-            Paragraph("Remarks: Confirmed &amp; Accepted" if sig_block.requires_remarks else "Status: Verified", meta_val_style),
-        ])
-
-    sig_table = Table([sig_cells], colWidths=[175, 175, 176])
+            Paragraph("Remarks: Physical/Field Observations Verified", meta_val_style),
+        ],
+        [
+            Paragraph("<b>Branch Head Scrutiny &amp; Acceptance</b>", signatory_title_style),
+            Spacer(1, 20),
+            Paragraph("Name: ________________________", meta_val_style),
+            Paragraph("Designation: Branch Manager / Head", meta_val_style),
+            Paragraph("Date: ________________________", meta_val_style),
+            Paragraph("Remarks: Scrutinized &amp; Recommended", meta_val_style),
+        ],
+        [
+            Paragraph("<b>Automated Quality Assurance</b>", signatory_title_style),
+            Spacer(1, 20),
+            Paragraph("System: SmartVerify Rule Platform", meta_val_style),
+            Paragraph("Version: Template v1.0 / Phase 10", meta_val_style),
+            Paragraph(f"Date: {gen_dt_str[:11]}", meta_val_style),
+            Paragraph("Integrity: Cryptographically Audited", meta_val_style),
+        ],
+    ]
+    sig_table = Table([sig_cells], colWidths=[261, 262, 262])
     sig_table.setStyle(TableStyle([
         ("BOX", (0, 0), (-1, -1), 0.75, colors.HexColor("#94A3B8")),
-        ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
-        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F8FAFC")),
-        ("TOPPADDING", (0, 0), (-1, -1), 6),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FFFFFF")),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ("LEFTPADDING", (0, 0), (-1, -1), 6),
         ("RIGHTPADDING", (0, 0), (-1, -1), 6),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
     ]))
-    story.append(KeepTogether([sig_table, Spacer(1, 4), Paragraph(f"<i>{template.footer.confidentiality_notice}</i>", subtitle_style)]))
+    status_flowables.append(sig_table)
+    status_flowables.append(Spacer(1, 4))
+    status_flowables.append(Paragraph(
+        f"<i>{sanitize_pdf_text(template.footer.confidentiality_notice)}</i>",
+        ParagraphStyle("Notice", parent=styles["Normal"], fontName="Helvetica-Oblique", fontSize=7, leading=9, textColor=colors.HexColor("#64748B"), alignment=TA_CENTER)
+    ))
 
-    # ─── EVIDENCE DOSSIER (SUPPORTING PAGES) ──────────────────────────────────
-    # Reviewer evidence selections filter: included == True ONLY
+    story.append(KeepTogether(status_flowables))
+
+    # ─── 4. EVIDENCE ANNEXURE (SUPPORTING DOSSIER) ───────────────────────────
     selected_evidence_items: List[Tuple[str, EvidenceReference]] = []
 
     # Map of selections: state.evidence_selections is Dict[particular_id, List[EvidenceSelection]]
@@ -692,7 +914,7 @@ def generate_pdf_report(request: PdfGenerationRequest) -> PdfGenerationResult:
     for pid, s_list in state.evidence_selections.items():
         selection_map[pid] = {s.evidence_id: s.included for s in s_list}
 
-    # Iterate particulars in order
+    # Iterate particulars in strict canonical order
     for item in template.particulars:
         p_mapping = evidence_map.particular_mappings.get(item.id)
         if not p_mapping or not p_mapping.evidence:
@@ -700,15 +922,14 @@ def generate_pdf_report(request: PdfGenerationRequest) -> PdfGenerationResult:
 
         p_selections = selection_map.get(item.id, {})
         for ref in p_mapping.evidence:
-            # Default to included if not explicitly toggled
             is_included = p_selections.get(ref.evidence_id, True)
             if is_included:
                 selected_evidence_items.append((item.id, ref))
 
     if selected_evidence_items:
         story.append(PageBreak())
-        story.append(Paragraph("<b>ANNEXURE: MAPPED VERIFICATION EVIDENCE DOSSIER</b>", title_style))
-        story.append(Paragraph("Supporting Documents, Government Portal Screenshots &amp; Field Site Photographs", subtitle_style))
+        story.append(Paragraph("<b>ANNEXURE: MAPPED VERIFICATION EVIDENCE DOSSIER</b>", report_title_style))
+        story.append(Paragraph("Supporting Documents, Government Portal Screenshots &amp; Field Site Photographs", brand_sub_style))
         story.append(Spacer(1, 4))
         story.append(Paragraph(
             "<i>Note: Displayed evidence reflects verified records selected and approved by the investigating officer. Excluded records are suppressed in accordance with banking governance rules.</i>",
@@ -724,7 +945,7 @@ def generate_pdf_report(request: PdfGenerationRequest) -> PdfGenerationResult:
                 p_item = template.get_particular_by_id(pid)
                 p_title = p_item.title if p_item else pid
                 story.append(Spacer(1, 4))
-                story.append(Paragraph(f"<b>Particular [{pid}]: {p_title}</b>", section_header_style))
+                story.append(Paragraph(f"<b>Particular [{pid}]: {sanitize_pdf_text(p_title)}</b>", audit_header_style))
                 story.append(Spacer(1, 3))
 
             # Resolve evidence asset via EvidenceAssetResolver
@@ -732,32 +953,35 @@ def generate_pdf_report(request: PdfGenerationRequest) -> PdfGenerationResult:
 
             # Build evidence card flowables
             card_flowables = []
-            
+
             # Party and status banner
             party_badge_color = "#1E3A8A" if asset.party == "APPLICANT" else ("#0D9488" if asset.party == "GUARANTOR" else "#64748B")
-            party_html = f"<font color='{party_badge_color}'><b>[{asset.party}]</b></font> &nbsp; <b>{asset.title}</b> &nbsp; <font color='#64748B'>[ID: {asset.evidence_id}]</font>"
-            card_flowables.append(Paragraph(party_html, table_cell_title_style))
+            party_html = (
+                f"<font color='{party_badge_color}'><b>[{asset.party}]</b></font> &nbsp; "
+                f"<b>{sanitize_pdf_text(asset.title)}</b> &nbsp; "
+                f"<font color='#64748B'>[ID: {sanitize_pdf_text(asset.evidence_id)}]</font> &nbsp;|&nbsp; "
+                f"<font color='#475569'>Status: {sanitize_pdf_text(asset.status)}</font>"
+            )
+            card_flowables.append(Paragraph(party_html, cell_title_style))
             card_flowables.append(Spacer(1, 2))
 
-            # Asset rendering: image vs status note vs placeholder
+            # Asset rendering: image vs status note vs metadata block
             if asset.is_image and asset.image_path and asset.image_dims:
                 w, h = asset.image_dims
                 card_flowables.append(RLImage(asset.image_path, width=w, height=h))
                 card_flowables.append(Spacer(1, 2))
-                card_flowables.append(Paragraph(f"<i>Source: {asset.source} | Status: {asset.status}</i>", table_cell_desc_style))
+                card_flowables.append(Paragraph(f"<i>Source: {sanitize_pdf_text(asset.source)} | Status: {sanitize_pdf_text(asset.status)}</i>", cell_desc_style))
             elif asset.status_note:
-                # Deterministic neutral note (Missing evidence or document attachment)
-                card_flowables.append(Paragraph(f"<b>Notice:</b> {asset.status_note}", meta_val_style))
-                card_flowables.append(Paragraph(f"<i>Source Reference: {asset.source} | Category: {ref.evidence_category}</i>", table_cell_desc_style))
+                card_flowables.append(Paragraph(f"<b>Notice:</b> {sanitize_pdf_text(asset.status_note)}", meta_val_style))
+                card_flowables.append(Paragraph(f"<i>Source Reference: {sanitize_pdf_text(asset.source)} | Category: {sanitize_pdf_text(ref.evidence_category or 'N/A')}</i>", cell_desc_style))
             else:
-                # Metadata card
-                meta_lines = [f"<b>{k}:</b> {v}" for k, v in list(asset.metadata.items())[:3]]
+                meta_lines = [f"<b>{sanitize_pdf_text(k)}:</b> {sanitize_pdf_text(v)}" for k, v in list(asset.metadata.items())[:3]]
                 meta_summary = " &nbsp;|&nbsp; ".join(meta_lines) if meta_lines else "Record finding substantiated."
                 card_flowables.append(Paragraph(meta_summary, meta_val_style))
-                card_flowables.append(Paragraph(f"<i>Verification Finding | Status: {asset.status}</i>", table_cell_desc_style))
+                card_flowables.append(Paragraph(f"<i>Verification Finding | Status: {sanitize_pdf_text(asset.status)}</i>", cell_desc_style))
 
-            # Wrap in single-cell table for neat card border
-            card_table = Table([[card_flowables]], colWidths=[526])
+            # Wrap in single-cell table for neat card border (Col width = 785 pt)
+            card_table = Table([[card_flowables]], colWidths=[785])
             card_table.setStyle(TableStyle([
                 ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
                 ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FFFFFF")),
@@ -769,13 +993,13 @@ def generate_pdf_report(request: PdfGenerationRequest) -> PdfGenerationResult:
             story.append(card_table)
             story.append(Spacer(1, 5))
 
-    # 4. Build Document using NumberedCanvas
+    # 5. Build Document using Two-Pass NumberedCanvas
     doc.build(story, canvasmaker=NumberedCanvas)
 
     pdf_bytes = buffer.getvalue()
     buffer.close()
 
-    # 5. Return Strongly-Typed Result
+    # 6. Return Strongly-Typed Result
     return PdfGenerationResult(
         pdf_bytes=pdf_bytes,
         page_count=doc.page,

@@ -11,7 +11,7 @@ import {
   editParticularReview,
   toggleEvidenceSelection,
   revalidateReportReview,
-  downloadReport
+  generateReportPdf
 } from '../services/api';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 
@@ -25,6 +25,7 @@ export default function ReportReviewPage() {
   const [editedTexts, setEditedTexts] = useState({});
   const [savingPid, setSavingPid] = useState(null);
   const [revalidating, setRevalidating] = useState(false);
+  const [generatingPdf, setGeneratingPdf] = useState(false);
   const [filterSection, setFilterSection] = useState('all');
 
   useEffect(() => {
@@ -102,6 +103,65 @@ export default function ReportReviewPage() {
       toast.success(`Evidence ${!currentIncluded ? 'included' : 'excluded'} for ${pid}`);
     } catch (err) {
       toast.error('Failed to toggle evidence: ' + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  const handleGeneratePdf = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!reviewState?.can_export_pdf || generatingPdf) return;
+
+    try {
+      setGeneratingPdf(true);
+      const res = await generateReportPdf(appId);
+
+      // Create Blob URL and trigger download without navigating away
+      const blob = new Blob([res.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `SmartVerify_Report_${appId}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      toast.success('PDF generated successfully.');
+    } catch (err) {
+      let errorMsg = 'PDF generation failed.';
+      const status = err.response?.status;
+
+      if (err.response?.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text();
+          const json = JSON.parse(text);
+          if (json.detail) {
+            if (typeof json.detail === 'string') {
+              errorMsg = json.detail;
+            } else if (json.detail.error) {
+              const reasons = json.detail.gate_reasons?.length
+                ? `: ${json.detail.gate_reasons.join(', ')}`
+                : '';
+              errorMsg = `${json.detail.error}${reasons}`;
+            } else {
+              errorMsg = JSON.stringify(json.detail);
+            }
+          }
+        } catch (parseErr) {
+          // fallback to default
+        }
+      } else if (err.response?.data?.detail) {
+        errorMsg = typeof err.response.data.detail === 'string'
+          ? err.response.data.detail
+          : JSON.stringify(err.response.data.detail);
+      }
+
+      if (status === 422) {
+        toast.error(errorMsg || 'Export validation failed.');
+      } else {
+        toast.error('PDF generation failed.');
+      }
+    } finally {
+      setGeneratingPdf(false);
     }
   };
 
@@ -224,18 +284,28 @@ export default function ReportReviewPage() {
           {/* PDF Export Button (Strict Gate) */}
           <div className="relative group">
             <button
-              disabled={!reviewState.can_export_pdf}
-              onClick={() => window.open(downloadReport(appId), '_blank')}
+              type="button"
+              disabled={!reviewState.can_export_pdf || generatingPdf}
+              onClick={handleGeneratePdf}
               className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold text-white transition-all ${
-                reviewState.can_export_pdf
+                reviewState.can_export_pdf && !generatingPdf
                   ? 'bg-primary-700 hover:bg-primary-800 shadow-sm cursor-pointer'
                   : 'bg-slate-400 opacity-60 cursor-not-allowed'
               }`}
             >
-              <Download className="w-4 h-4" />
-              Generate PDF
+              {generatingPdf ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  Generating PDF...
+                </>
+              ) : (
+                <>
+                  <Download className="w-4 h-4" />
+                  Generate PDF
+                </>
+              )}
             </button>
-            {!reviewState.can_export_pdf && (
+            {!reviewState.can_export_pdf && !generatingPdf && (
               <div className="absolute right-0 top-full mt-1.5 hidden group-hover:block z-20 w-64 p-2 bg-slate-900 text-white text-[11px] rounded shadow-lg">
                 PDF Export is disabled. Resolve all BLOCKING issues before PDF generation can be enabled.
               </div>

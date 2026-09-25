@@ -17,10 +17,15 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response?.status === 401) {
+    // If 401 on login endpoint, do NOT redirect or reload the page!
+    // Let the LoginPage component handle the error and display toast/error banner.
+    const isLoginRequest = err.config?.url?.includes("/auth/login");
+    if (err.response?.status === 401 && !isLoginRequest) {
       localStorage.removeItem("token");
       localStorage.removeItem("user");
-      window.location.href = "/login";
+      if (window.location.pathname !== "/login") {
+        window.location.href = "/login";
+      }
     }
     return Promise.reject(err);
   }
@@ -62,6 +67,10 @@ export const getReportReview = (appId) => api.get(`/report/${appId}/review`);
 export const editParticularReview = (appId, data) => api.post(`/report/${appId}/review/edit`, data);
 export const toggleEvidenceSelection = (appId, data) => api.post(`/report/${appId}/review/evidence`, data);
 export const revalidateReportReview = (appId) => api.post(`/report/${appId}/review/revalidate`);
+export const generateReportPdf = (appId) =>
+  api.post(`/api/reports/${appId}/generate-pdf`, {}, {
+    responseType: 'blob'
+  });
 
 // ── Dashboard ─────────────────────────────────────────────────────────────
 export const getDashboardStats = (branch = "") => api.get(`/dashboard/stats${branch ? `?branch=${encodeURIComponent(branch)}` : ""}`);
