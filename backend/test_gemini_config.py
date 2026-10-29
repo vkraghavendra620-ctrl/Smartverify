@@ -17,8 +17,29 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 
+def test_gemini_primary_config_detection():
+    """Verify that Gemini Flash-Lite is configured as the active primary runtime model."""
+    from app.core.config import settings
+    from app.agents.agent_definitions import get_llm, build_agents
+
+    provider = getattr(settings, "LLM_PROVIDER", "gemini")
+    assert provider == "gemini", f"Expected provider 'gemini', got '{provider}'"
+
+    gemini_model = getattr(settings, "GEMINI_MODEL", "gemini/gemini-flash-lite-latest")
+    assert "lite" in gemini_model.lower(), f"Expected lite model, got '{gemini_model}'"
+
+    llm = get_llm()
+    assert llm is not None
+    assert "lite" in llm.model.lower() or "gemini" in llm.model.lower()
+
+    agents = build_agents(db_session=None)
+    assert len(agents) == 5
+    for name, agent in agents.items():
+        assert "lite" in agent.llm.model.lower() or "gemini" in agent.llm.model.lower()
+
+
 def test_groq_config_detection():
-    """Verify that Groq is active, detected, and used by all 5 agents."""
+    """Verify that Groq configuration is preserved when explicitly requested."""
     test_groq_key = "gsk_mock_test_key_for_safe_unit_testing_12345"
 
     orig_provider = os.environ.get("LLM_PROVIDER")
@@ -48,7 +69,9 @@ def test_groq_config_detection():
         # 4. get_llm() resolution
         llm = get_llm()
         assert llm is not None, "get_llm() returned None"
-        assert llm.model == expected_model, f"Expected LLM model '{expected_model}', got '{llm.model}'"
+        assert llm.model in (expected_model, f"groq/{expected_model}"), (
+            f"Expected LLM model '{expected_model}' or 'groq/{expected_model}', got '{llm.model}'"
+        )
         assert llm.api_key == test_groq_key, "LLM api_key does not match configured test key"
 
         # 5. All 5 agents use the exact same Groq LLM
@@ -63,7 +86,7 @@ def test_groq_config_detection():
         for name in expected_agents:
             assert name in agents, f"Missing agent: {name}"
             agent = agents[name]
-            assert agent.llm.model == expected_model, (
+            assert agent.llm.model in (expected_model, f"groq/{expected_model}"), (
                 f"Agent '{name}' has model '{agent.llm.model}', expected '{expected_model}'"
             )
 
@@ -96,10 +119,12 @@ def test_gemini_fallback_detection():
     orig_provider = os.environ.get("LLM_PROVIDER")
     orig_gemini = os.environ.get("GEMINI_API_KEY")
     orig_google = os.environ.get("GOOGLE_API_KEY")
+    orig_gemini_model = os.environ.get("GEMINI_MODEL")
 
     try:
         os.environ["LLM_PROVIDER"] = "gemini"
         os.environ["GEMINI_API_KEY"] = test_key
+        os.environ["GEMINI_MODEL"] = "gemini-3.8-flash"
         if "GOOGLE_API_KEY" in os.environ:
             del os.environ["GOOGLE_API_KEY"]
 
@@ -134,6 +159,11 @@ def test_gemini_fallback_detection():
             os.environ["GOOGLE_API_KEY"] = orig_google
         elif "GOOGLE_API_KEY" in os.environ:
             del os.environ["GOOGLE_API_KEY"]
+
+        if orig_gemini_model is not None:
+            os.environ["GEMINI_MODEL"] = orig_gemini_model
+        elif "GEMINI_MODEL" in os.environ:
+            del os.environ["GEMINI_MODEL"]
 
 
 if __name__ == "__main__":

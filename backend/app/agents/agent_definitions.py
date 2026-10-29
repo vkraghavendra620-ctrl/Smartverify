@@ -26,18 +26,26 @@ logger = logging.getLogger(__name__)
 def get_llm(provider: str = None, model: str = None) -> LLM:
     """
     Build an LLM instance for CrewAI agents.
-    Supports Groq (active default via LLM_PROVIDER="groq") and Gemini (fallback via LLM_PROVIDER="gemini").
+    Defaults to Gemini (primary runtime via LLM_PROVIDER="gemini", using gemini-flash-lite-latest).
+    Supports Groq as alternative when explicitly requested.
     """
     active_provider = (
         provider
         or os.environ.get("LLM_PROVIDER")
-        or getattr(settings, "LLM_PROVIDER", "groq")
-        or "groq"
+        or getattr(settings, "LLM_PROVIDER", "gemini")
+        or "gemini"
     ).strip().lower()
 
     temperature = getattr(settings, "CREWAI_TEMPERATURE", 0.2)
+    timeout = getattr(settings, "LLM_REQUEST_TIMEOUT", getattr(settings, "LLM_TIMEOUT", 90.0))
 
     if active_provider == "groq":
+        try:
+            import litellm
+            litellm.drop_params = True
+        except ImportError:
+            pass
+
         chosen_model = (
             model
             or os.environ.get("GROQ_MODEL")
@@ -56,29 +64,21 @@ def get_llm(provider: str = None, model: str = None) -> LLM:
             if not os.environ.get("GROQ_API_KEY"):
                 os.environ["GROQ_API_KEY"] = api_key
 
-        if chosen_model.startswith("openai/"):
-            llm = LLM(
-                model=chosen_model,
-                temperature=temperature,
-                api_key=api_key if api_key else None,
-                base_url="https://api.groq.com/openai/v1",
-            )
-            llm.model = chosen_model
-            return llm
-        elif chosen_model.startswith("groq/"):
-            return LLM(
-                model=chosen_model,
-                temperature=temperature,
-                api_key=api_key if api_key else None,
-            )
+        # Compose model string with provider prefix for LiteLLM routing
+        if chosen_model.startswith("groq/"):
+            full_model = chosen_model
         else:
-            return LLM(
-                model=f"groq/{chosen_model}",
-                temperature=temperature,
-                api_key=api_key if api_key else None,
-            )
+            full_model = f"groq/{chosen_model}"
 
-    # Gemini fallback
+        return LLM(
+            model=full_model,
+            temperature=temperature,
+            api_key=api_key if api_key else None,
+            timeout=timeout,
+            request_timeout=timeout,
+        )
+
+    # Gemini primary runtime / fallback
     api_key = (
         os.environ.get("GEMINI_API_KEY")
         or os.environ.get("GOOGLE_API_KEY")
@@ -99,22 +99,30 @@ def get_llm(provider: str = None, model: str = None) -> LLM:
         model
         or os.environ.get("GEMINI_MODEL")
         or getattr(settings, "GEMINI_MODEL", "")
-        or "gemini-3.8-flash"
+        or "gemini-flash-lite-latest"
     ).strip()
 
-    # Avoid deprecated gemini-2.5-flash (returns 404 in Google API)
-    if "gemini-2.5" in configured_model:
-        gemini_model = "gemini/gemini-3.8-flash"
-    elif configured_model.startswith("gemini/"):
+    if configured_model.startswith("gemini/"):
         gemini_model = configured_model
     else:
         gemini_model = f"gemini/{configured_model}"
 
-    return LLM(
-        model=gemini_model,
-        temperature=temperature,
-        api_key=api_key if api_key else None,
-    )
+    gemini_kwargs = {
+        "model": gemini_model,
+        "temperature": temperature,
+        "api_key": api_key if api_key else None,
+        "timeout": timeout,
+        "request_timeout": timeout,
+    }
+
+    if timeout:
+        try:
+            from google.genai import types as genai_types
+            gemini_kwargs["client_params"] = {"http_options": genai_types.HttpOptions(timeout=int(timeout * 1000))}
+        except Exception:
+            gemini_kwargs["client_params"] = {"http_options": {"timeout": int(timeout * 1000)}}
+
+    return LLM(**gemini_kwargs)
 
 
 def build_agents(db_session, shared_context=None, provider: str = None, model: str = None, llm: LLM = None) -> dict:
@@ -123,7 +131,7 @@ def build_agents(db_session, shared_context=None, provider: str = None, model: s
     memory_tool = MemoryTool(shared_context=shared_context)
     policy_tool = PolicyRetrievalTool()
     similarity_tool = SimilaritySearchTool()
-    ocr_tool = OCRTool()
+    ocr_tool = OCRTool(db_session=db_session)
     extraction_tool = InformationExtractionTool()
     fraud_tool = FraudDetectionTool(db_session=db_session)
     report_tool = ReportGenerationTool()
@@ -143,6 +151,7 @@ def build_agents(db_session, shared_context=None, provider: str = None, model: s
         llm=llm,
         verbose=True,
         allow_delegation=False,
+        max_iter=5,
     )
 
     extraction_specialist = Agent(
@@ -161,6 +170,7 @@ def build_agents(db_session, shared_context=None, provider: str = None, model: s
         llm=llm,
         verbose=True,
         allow_delegation=False,
+        max_iter=5,
     )
 
     verification_officer = Agent(
@@ -171,14 +181,14 @@ def build_agents(db_session, shared_context=None, provider: str = None, model: s
         ),
         backstory=(
             "You are a senior loan verification officer. You strictly use the provided "
-            "Applicant Profile and Loan Details to determine eligibility. You must use "
-            "the PolicyRetrievalTool to retrieve Bank Policies, Loan Eligibility Policies, "
-            "and Income Policies from the vector database before making any recommendation."
+            "Applicant Profile and Loan Details to determine eligibility. You query the "
+            "PolicyRetrievalTool for relevant bank and income policies before making a recommendation."
         ),
         tools=[memory_tool, policy_tool],
         llm=llm,
         verbose=True,
         allow_delegation=False,
+        max_iter=5,
     )
 
     gov_verification_agent = Agent(
@@ -190,7 +200,7 @@ def build_agents(db_session, shared_context=None, provider: str = None, model: s
         ),
         backstory=(
             "You are a government ID verification specialist. You check Aadhaar and PAN "
-            "validity statuses using the manual UI record. You must use the "
+            "validity statuses using the manual UI record. You use the "
             "SimilaritySearchTool to retrieve similar historical applications, and the "
             "fraud_detection_tool to calculate a risk score based on duplicates and inconsistencies."
         ),
@@ -198,6 +208,7 @@ def build_agents(db_session, shared_context=None, provider: str = None, model: s
         llm=llm,
         verbose=True,
         allow_delegation=False,
+        max_iter=5,
     )
 
     compliance_reporter = Agent(
@@ -216,6 +227,7 @@ def build_agents(db_session, shared_context=None, provider: str = None, model: s
         llm=llm,
         verbose=True,
         allow_delegation=False,
+        max_iter=5,
     )
 
     return {

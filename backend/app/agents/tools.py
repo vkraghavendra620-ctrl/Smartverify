@@ -12,11 +12,13 @@ agentic orchestration layer.
 
 import json
 import logging
+import os
 from typing import Any, Dict, List, Type
 
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
 
+from app.core.config import settings
 from app.services.ocr_service import extract_text
 from app.services.nlp_service import extract_information
 from app.services.classification_service import classify_document
@@ -45,9 +47,42 @@ class OCRTool(BaseTool):
     )
     args_schema: Type[BaseModel] = OCRToolInput
 
+    def __init__(self, db_session=None, **kwargs):
+        super().__init__(**kwargs)
+        self._db = db_session
+
     def _run(self, file_path: str) -> str:
         try:
-            text = extract_text(file_path)
+            # 1. Fast-path: Check database for pre-extracted OCR text to avoid duplicate 30s CPU OCR
+            if self._db is not None:
+                try:
+                    from app.models.document import Document
+                    from pathlib import Path
+                    target_name = Path(file_path).name
+                    doc = (
+                        self._db.query(Document)
+                        .filter(
+                            (Document.file_path == file_path) |
+                            (Document.file_path.endswith(target_name)) |
+                            (Document.original_name == target_name)
+                        )
+                        .first()
+                    )
+                    if doc and doc.extracted_text and doc.extracted_text.strip():
+                        logger.info(f"OCRTool: Returning pre-extracted OCR text ({len(doc.extracted_text)} chars) for {target_name} from database")
+                        return doc.extracted_text.strip()
+                except Exception as db_lookup_err:
+                    logger.debug(f"OCRTool pre-extracted text lookup skipped: {db_lookup_err}")
+
+            if not os.path.exists(file_path):
+                # Retrieve securely via storage service (supports Supabase object keys and remote storage)
+                from app.services.storage_service import get_storage_service
+                storage = get_storage_service()
+                with storage.get_local_temp_file(settings.SUPABASE_DOCUMENTS_BUCKET, file_path) as local_temp_path:
+                    text = extract_text(local_temp_path)
+            else:
+                text = extract_text(file_path)
+
             if not text:
                 return (
                     "NO_TEXT_EXTRACTED: Raw OCR text unavailable for this file path. "
@@ -245,15 +280,34 @@ class PolicyRetrievalTool(BaseTool):
     )
     args_schema: Type[BaseModel] = PolicyRetrievalInput
 
+    _cache: Dict[str, str] = {}
+
     def _run(self, query: str) -> str:
+        cache_key = (query or "").strip().lower()
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
         try:
             from app.services.vector_service import VectorService
             service = VectorService()
             policies = service.retrieve_policies(query=query)
-            return json.dumps(policies, default=str)
+            if not policies:
+                result = json.dumps({
+                    "status": "not_found",
+                    "policies": [],
+                    "message": "No matching bank policies found in vector database for this query."
+                })
+            else:
+                result = json.dumps(policies, default=str)
+            self._cache[cache_key] = result
+            return result
         except Exception as e:
             logger.error(f"PolicyRetrievalTool failed: {e}")
-            return json.dumps({"error": str(e)})
+            return json.dumps({
+                "status": "error",
+                "policies": [],
+                "error": f"Policy retrieval failed: {str(e)}"
+            })
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -271,16 +325,35 @@ class SimilaritySearchTool(BaseTool):
     )
     args_schema: Type[BaseModel] = SimilaritySearchInput
 
+    _cache: Dict[str, str] = {}
+
     def _run(self, extracted_info: str) -> str:
+        cache_key = (extracted_info or "").strip()
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
         try:
             from app.services.vector_service import VectorService
             info = json.loads(extracted_info) if isinstance(extracted_info, str) else extracted_info
             service = VectorService()
             similars = service.find_similar_applications(extracted_info=info)
-            return json.dumps(similars, default=str)
+            if not similars:
+                result = json.dumps({
+                    "status": "not_found",
+                    "similar_cases": [],
+                    "message": "No similar historical applications found in vector database."
+                })
+            else:
+                result = json.dumps(similars, default=str)
+            self._cache[cache_key] = result
+            return result
         except Exception as e:
             logger.error(f"SimilaritySearchTool failed: {e}")
-            return json.dumps({"error": str(e)})
+            return json.dumps({
+                "status": "error",
+                "similar_cases": [],
+                "error": f"Similarity search failed: {str(e)}"
+            })
 
 
 # ──────────────────────────────────────────────────────────────────────────

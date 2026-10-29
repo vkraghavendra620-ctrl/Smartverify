@@ -1,17 +1,47 @@
 """Report retrieval endpoint."""
+from typing import Dict, Any, Tuple, Optional
+import os
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-import os
 
 from app.db.database import get_db
+from app.models.application import Application
 from app.models.verification_report import VerificationReport
 from app.models.user import User
 from app.schemas.report import ReportOut
 from app.core.security import get_current_user
+from app.api.endpoints.documents import authorize_application_access
 from app.services.report_service import generate_report
 
 router = APIRouter()
+
+
+def _get_authorized_application(
+    application_id: int,
+    db: Session,
+    current_user: User,
+) -> Application:
+    application = db.query(Application).filter(Application.id == application_id).first()
+    if not application:
+        raise HTTPException(status_code=404, detail="Application not found")
+    authorize_application_access(application, current_user)
+    return application
+
+
+def _get_authorized_application_and_report(
+    application_id: int,
+    db: Session,
+    current_user: User,
+    report_not_found_detail: str = "Report not found",
+) -> Tuple[Application, VerificationReport]:
+    application = _get_authorized_application(application_id, db, current_user)
+    report = db.query(VerificationReport).filter(
+        VerificationReport.application_id == application_id
+    ).first()
+    if not report:
+        raise HTTPException(status_code=404, detail=report_not_found_detail)
+    return application, report
 
 
 @router.get("/{application_id}", response_model=ReportOut)
@@ -20,11 +50,7 @@ def get_report(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    report = db.query(VerificationReport).filter(
-        VerificationReport.application_id == application_id
-    ).first()
-    if not report:
-        raise HTTPException(status_code=404, detail="Report not found")
+    _, report = _get_authorized_application_and_report(application_id, db, current_user)
     return report
 
 
@@ -34,11 +60,7 @@ def download_report(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    report = db.query(VerificationReport).filter(
-        VerificationReport.application_id == application_id
-    ).first()
-    if not report:
-        raise HTTPException(status_code=404, detail="Report not found")
+    _, report = _get_authorized_application_and_report(application_id, db, current_user)
 
     # Always regenerate to ensure the current report engine (V6) is used.
     try:
@@ -62,11 +84,9 @@ def regenerate_pdf(
     current_user: User = Depends(get_current_user),
 ):
     """On-demand PDF regeneration without re-running the AI pipeline."""
-    report = db.query(VerificationReport).filter(
-        VerificationReport.application_id == application_id
-    ).first()
-    if not report:
-        raise HTTPException(status_code=404, detail="Report not found. Run AI verification first.")
+    _, report = _get_authorized_application_and_report(
+        application_id, db, current_user, report_not_found_detail="Report not found. Run AI verification first."
+    )
 
     try:
         pdf_path = generate_report(application_id=application_id, db=db)
@@ -81,7 +101,6 @@ def regenerate_pdf(
 # ─────────────────────────────────────────────────────────────────────────────
 # PHASE 8: REPORT PREVIEW / REVIEW EDITOR ENDPOINTS (IN-MEMORY ONLY)
 # ─────────────────────────────────────────────────────────────────────────────
-from typing import Dict, Any
 from app.report_templates import get_template
 from app.schemas.report_review import (
     ReportReviewState,
@@ -107,6 +126,31 @@ from app.services.pdf_generator import generate_pdf_report
 _review_sessions: Dict[int, Dict[str, Any]] = {}
 
 
+def _get_authorized_review_session(
+    application_id: int,
+    current_user: User,
+    db: Optional[Session] = None,
+    not_initialized_detail: str = "Review session not initialized. Fetch review first.",
+) -> Dict[str, Any]:
+    session = _review_sessions.get(application_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=not_initialized_detail)
+
+    if db is not None:
+        application = db.query(Application).filter(Application.id == application_id).first()
+        if application:
+            authorize_application_access(application, current_user)
+            return session
+
+    session_user_id = session.get("user_id")
+    if session_user_id is not None:
+        role_val = current_user.role.value if hasattr(current_user.role, "value") else str(getattr(current_user, "role", ""))
+        if role_val != "admin" and current_user.id != session_user_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+    return session
+
+
 @router.get("/{application_id}/review", response_model=ReportReviewState)
 def get_report_review(
     application_id: int,
@@ -117,6 +161,8 @@ def get_report_review(
     Retrieve or initialize an in-memory review session for the given application.
     Does NOT write to database, does NOT call Gemini, does NOT generate PDF.
     """
+    application = _get_authorized_application(application_id, db, current_user)
+
     if application_id in _review_sessions:
         return _review_sessions[application_id]["state"]
 
@@ -139,6 +185,7 @@ def get_report_review(
         "template": template,
         "baseline": baseline,
         "validated": validated,
+        "user_id": application.user_id,
     }
     return state
 
@@ -147,15 +194,16 @@ def get_report_review(
 def edit_particular_review(
     application_id: int,
     edit_req: ParticularEditRequest,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
     Apply manual Verification Details text edit.
     Records audit entry, increments revision, executes Phase 7 revalidation.
     """
-    session = _review_sessions.get(application_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Review session not initialized. Fetch review first.")
+    session = _get_authorized_review_session(
+        application_id, current_user, db=db, not_initialized_detail="Review session not initialized. Fetch review first."
+    )
 
     try:
         updated_state = apply_particular_edit(
@@ -175,15 +223,16 @@ def edit_particular_review(
 def toggle_evidence_selection(
     application_id: int,
     toggle_req: EvidenceToggleRequest,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
     Toggle inclusion/exclusion for a mapped evidence item.
     Guards applicant/guarantor isolation and does NOT mutate Phase 5 evidence map.
     """
-    session = _review_sessions.get(application_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Review session not initialized.")
+    session = _get_authorized_review_session(
+        application_id, current_user, db=db, not_initialized_detail="Review session not initialized."
+    )
 
     try:
         updated_state = apply_evidence_selection(
@@ -202,14 +251,15 @@ def toggle_evidence_selection(
 @router.post("/{application_id}/review/revalidate", response_model=ReportReviewState)
 def revalidate_review(
     application_id: int,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
     Deterministically revalidate the current review state using Phase 7 validator.
     """
-    session = _review_sessions.get(application_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Review session not initialized.")
+    session = _get_authorized_review_session(
+        application_id, current_user, db=db, not_initialized_detail="Review session not initialized."
+    )
 
     updated_state = revalidate_review_state(
         state=session["state"],
@@ -228,6 +278,7 @@ def revalidate_review(
 @router.post("/{application_id}/generate-pdf")
 def generate_approved_pdf(
     application_id: int,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -239,9 +290,9 @@ def generate_approved_pdf(
     - Returns application/pdf streaming response
     - ZERO database mutation, ZERO PDF persistence
     """
-    session = _review_sessions.get(application_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Review session not initialized. Fetch review first.")
+    session = _get_authorized_review_session(
+        application_id, current_user, db=db, not_initialized_detail="Review session not initialized. Fetch review first."
+    )
 
     state: ReportReviewState = session["state"]
     if not state.can_export_pdf:
@@ -281,4 +332,3 @@ def generate_approved_pdf(
             status_code=500,
             detail=f"PDF generation failed: {str(e)}"
         )
-

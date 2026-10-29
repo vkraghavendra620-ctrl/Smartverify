@@ -55,3 +55,6 @@ Thumbs.db
 *.sublime-project
 *.sublime-workspace
 
+
+# Local application cache
+backend/.appdata/

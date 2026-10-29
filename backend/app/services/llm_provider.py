@@ -198,8 +198,8 @@ class MockLLMProvider(LLMProvider):
 
 def mask_secrets(text: Any) -> str:
     """
-    Sanitize text by redacting API keys and sensitive tokens.
-    Prevents leaking credentials in logs, console output, or error messages.
+    Sanitize text by redacting API keys, sensitive tokens, and applicant personal information.
+    Prevents leaking credentials or applicant PII in logs, console output, or error messages.
     """
     if text is None:
         return ""
@@ -216,7 +216,7 @@ def mask_secrets(text: Any) -> str:
         if key in s:
             s = s.replace(key, "[REDACTED_API_KEY]")
 
-    # 2. Redact patterns: Groq (gsk_...), Google (AIza... or AQ....), Bearer tokens
+    # 2. Redact patterns: Groq (gsk_...), Google (AIza... or AQ....), Bearer tokens, query keys
     import re
     s = re.sub(r"gsk_[A-Za-z0-9_-]{10,}", "[REDACTED_GROQ_KEY]", s)
     s = re.sub(r"AIza[0-9A-Za-z_-]{25,}", "[REDACTED_GEMINI_KEY]", s)
@@ -224,27 +224,99 @@ def mask_secrets(text: Any) -> str:
     s = re.sub(r"(Bearer\s+)[A-Za-z0-9._-]{15,}", r"\1[REDACTED_TOKEN]", s)
     s = re.sub(r"([?&]key=)[^&\s]+", r"\1[REDACTED_KEY]", s)
 
+    # 3. Redact applicant personal information (PII)
+    s = re.sub(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", "[REDACTED_EMAIL]", s)
+    s = re.sub(r"\b[A-Z]{5}[0-9]{4}[A-Z]{1}\b", "[REDACTED_PAN]", s)
+    s = re.sub(r"\b\d{4}\s\d{4}\s\d{4}\b", "[REDACTED_AADHAAR]", s)
+    s = re.sub(r"\b\d{12}\b", "[REDACTED_AADHAAR]", s)
+    s = re.sub(r"\b(?:\+91[\s-]?)?[6-9]\d{9}\b", "[REDACTED_PHONE]", s)
+
     return s
 
 
-def is_retryable_provider_error(exc: Exception) -> tuple[bool, str]:
+def classify_provider_error(exc: Exception) -> dict:
     """
-    Determine if an exception represents a transient provider failure:
-    - HTTP 429 / rate limit / quota exceeded
-    - HTTP 5xx temporary server errors (500, 502, 503, 504)
-    - Timeout / network connection failure
-
-    Returns:
-        (is_retryable, sanitized_reason_str)
-
-    Explicitly excludes:
-    - Ordinary application errors (ValueError, KeyError, TypeError)
-    - Invalid structured output / parsing errors (JSONDecodeError, ValidationError)
+    Classify an exception into a definitive provider error category:
+    - billing_error: Non-retryable. Project billing inactive or required.
+    - auth_error: Non-retryable. Bad API key or unauthorized permissions.
+    - daily_quota_exhausted: Non-retryable. Daily free-tier or plan cap exhausted.
+    - rate_limit: Retryable once with backoff. Transient RPM/TPM spike.
+    - server_error: Retryable once with backoff. 5xx or transient provider overload.
+    - timeout: Retryable once with backoff. Connection or read timeout.
+    - client_error: Non-retryable. Model not found, bad request, or invalid parameters.
+    - application_error: Non-retryable internal error.
     """
     if exc is None:
-        return False, "No exception"
+        return {"category": "none", "is_retryable": False, "sanitized_reason": "No exception"}
 
-    # 1. Check for non-retryable application/parsing errors first
+    err_str = f"{type(exc).__name__}: {str(exc)}"
+    if getattr(exc, "__cause__", None):
+        err_str += f" | Cause: {type(exc.__cause__).__name__}: {str(exc.__cause__)}"
+
+    sanitized = mask_secrets(err_str)
+    lower = sanitized.lower()
+    exc_cls_name = type(exc).__name__
+
+    status_code = getattr(exc, "status_code", None) or getattr(exc, "http_status", None)
+    if status_code is None and hasattr(exc, "response") and hasattr(exc.response, "status_code"):
+        status_code = exc.response.status_code
+
+    # 1. Billing errors (Priority: must be checked before quota/rate limit)
+    billing_keywords = (
+        "billing not enabled", "billing is not enabled", "enable billing",
+        "billing account", "has not enabled billing", "billing disabled",
+        "billing required", "payment required", "no active billing"
+    )
+    if status_code == 402 or any(k in lower for k in billing_keywords):
+        return {
+            "category": "billing_error",
+            "is_retryable": False,
+            "can_fallback": False,
+            "sanitized_reason": f"billing error: {sanitized}"
+        }
+
+    # 2. Authentication / Permission errors (HTTP 401, 403, or auth messages)
+    auth_keywords = (
+        "api_key_invalid", "invalid_api_key", "invalid api key", "unauthorized",
+        "authentication failed", "permission denied", "forbidden", "bad credentials",
+        "unauthenticated", "api key not valid"
+    )
+    if status_code in (401, 403) or any(k in exc_cls_name for k in ("Authentication", "PermissionDenied", "Unauthorized", "Unauthenticated")) or any(k in lower for k in auth_keywords):
+        return {
+            "category": "auth_error",
+            "is_retryable": False,
+            "can_fallback": True,
+            "sanitized_reason": f"authentication error (HTTP {status_code or exc_cls_name}): {sanitized}"
+        }
+
+    # 3. Client / Model errors (HTTP 400, 404, or invalid model messages)
+    client_keywords = (
+        "model not found", "is no longer available", "does not exist",
+        "unsupported model", "invalid_argument", "tool_use_failed"
+    )
+    if status_code in (400, 404) or any(k in exc_cls_name for k in ("NotFound", "NotFoundError", "UnmappedModel", "BadRequest", "BadRequestError")) or any(k in lower for k in client_keywords):
+        return {
+            "category": "client_error",
+            "is_retryable": False,
+            "can_fallback": True,
+            "sanitized_reason": f"client/model error (HTTP {status_code or exc_cls_name}): {sanitized}"
+        }
+
+    # 4. Daily / Account Quota Exhaustion (Distinguished from transient rate limits)
+    daily_quota_keywords = (
+        "daily quota", "free_tier_requests_per_day", "requests per day", "rpd",
+        "quota exceeded for quota metric ... per day", "quota exhausted for the day",
+        "day limit"
+    )
+    if any(k in lower for k in daily_quota_keywords):
+        return {
+            "category": "daily_quota_exhausted",
+            "is_retryable": False,
+            "can_fallback": False,
+            "sanitized_reason": f"daily quota exhausted: {sanitized}"
+        }
+
+    # 5. Non-retryable application/parsing errors
     non_retryable_types = (
         ValueError,
         KeyError,
@@ -258,12 +330,98 @@ def is_retryable_provider_error(exc: Exception) -> tuple[bool, str]:
     except ImportError:
         pass
 
-    # Inspect status code if present directly or on response
-    status_code = getattr(exc, "status_code", None) or getattr(exc, "http_status", None)
-    if status_code is None and hasattr(exc, "response") and hasattr(exc.response, "status_code"):
-        status_code = exc.response.status_code
+    if isinstance(exc, non_retryable_types) and not any(k in lower for k in ("429", "500", "502", "503", "504", "rate limit", "timeout")):
+        return {
+            "category": "application_error",
+            "is_retryable": False,
+            "can_fallback": False,
+            "sanitized_reason": sanitized
+        }
 
-    # Extract all text from exception, cause, and args
+    # 6. Transient Rate Limits (HTTP 429, RPM/TPM limit exceeded)
+    rate_limit_keywords = (
+        "rate limit", "rate_limit", "quota exceeded", "quota", "429",
+        "resource_exhausted", "too many requests", "tokens per minute", "tpm", "rpm"
+    )
+    if status_code == 429 or any(k in exc_cls_name for k in ("RateLimitError", "QuotaExceeded", "ResourceExhausted")) or any(k in lower for k in rate_limit_keywords):
+        return {
+            "category": "rate_limit",
+            "is_retryable": True,
+            "can_fallback": True,
+            "sanitized_reason": f"429 rate limit: {sanitized}"
+        }
+
+    # 7. Temporary 5xx Server Errors
+    server_keywords = (
+        "500 internal server error", "502 bad gateway", "503 service unavailable",
+        "503", "504 gateway timeout", "504", "overloaded", "high demand",
+        "temporarily unavailable", "server is busy", "capacity", "unavailable"
+    )
+    if status_code in (500, 502, 503, 504) or any(k in exc_cls_name for k in ("ServiceUnavailableError", "InternalServerError", "BadGatewayError")) or any(k in lower for k in server_keywords):
+        return {
+            "category": "server_error",
+            "is_retryable": True,
+            "can_fallback": True,
+            "sanitized_reason": f"{status_code or '5xx'} provider error: {sanitized}"
+        }
+
+    # 8. Timeout & Connection Failures
+    timeout_keywords = (
+        "timeout", "timed out", "connection reset", "connection refused",
+        "failed to connect", "network unreachable"
+    )
+    if any(k in exc_cls_name for k in ("Timeout", "TimeOut", "ConnectTimeout", "ReadTimeout", "APIConnectionError", "ConnectError", "NetworkError", "ConnectionRefusedError")) or any(k in lower for k in timeout_keywords):
+        return {
+            "category": "timeout",
+            "is_retryable": True,
+            "can_fallback": True,
+            "sanitized_reason": f"timeout / connection failure: {sanitized}"
+        }
+
+    return {
+        "category": "unknown",
+        "is_retryable": False,
+        "can_fallback": False,
+        "sanitized_reason": sanitized
+    }
+
+
+def is_retryable_provider_error(exc: Exception) -> tuple[bool, str]:
+    """
+    Determine if an exception represents a transient provider failure:
+    - HTTP 429 / transient rate limit
+    - HTTP 5xx temporary server errors (500, 502, 503, 504)
+    - Timeout / network connection failure
+
+    Returns:
+        (is_retryable, sanitized_reason_str)
+
+    Explicitly excludes (NON-RETRYABLE):
+    - Billing failures (billing not enabled, billing account missing)
+    - Daily quota exhaustion (requests per day reached)
+    - Authentication errors (HTTP 401, 403, auth messages)
+    - Client/model errors (HTTP 400, 404, invalid models)
+    - Application errors (ValueError, KeyError, TypeError, JSONDecodeError)
+    """
+    classified = classify_provider_error(exc)
+    return classified["is_retryable"], classified["sanitized_reason"]
+
+
+def is_provider_error(exc: Exception) -> tuple[bool, str]:
+    """
+    Determine if an exception represents a provider-level failure eligible for
+    fallback cascade (as opposed to an internal application bug like TypeError/KeyError):
+    - HTTP 401 / 403 (Authentication / Authorization / Permission failure)
+    - HTTP 404 (Model not found / unmapped / unavailable)
+    - HTTP 400 (Bad request / invalid model parameters)
+    - HTTP 429 / 5xx (Rate limit / Quota / Gateway / Server error)
+    - Timeout / Network connection failure
+    - LiteLLM / Provider SDK exceptions (APIError, BadRequestError, AuthenticationError, etc.)
+    - Malformed LLM output errors
+    """
+    if exc is None:
+        return False, "No exception"
+
     err_str = f"{type(exc).__name__}: {str(exc)}"
     if getattr(exc, "__cause__", None):
         err_str += f" | Cause: {type(exc.__cause__).__name__}: {str(exc.__cause__)}"
@@ -271,71 +429,46 @@ def is_retryable_provider_error(exc: Exception) -> tuple[bool, str]:
     sanitized = mask_secrets(err_str)
     lower = sanitized.lower()
 
-    # 2. Explicitly reject authentication/permission errors (HTTP 401, 403, or auth messages)
-    if status_code in (401, 403):
-        return False, f"authentication error (HTTP {status_code}): {sanitized}"
-    if any(k in lower for k in (
-        "api_key_invalid", "invalid_api_key", "invalid api key", "unauthorized",
-        "authentication failed", "permission denied", "forbidden", "bad credentials",
-        "unauthenticated", "api key not valid"
-    )):
-        return False, f"authentication error: {sanitized}"
+    if isinstance(exc, ProviderError):
+        return True, sanitized
 
-    # 3. Explicitly reject malformed requests or invalid model errors (HTTP 400, 404, or model messages)
-    if status_code == 400:
-        return False, f"malformed request error (HTTP 400): {sanitized}"
-    if status_code == 404:
-        return False, f"invalid model error (HTTP 404): {sanitized}"
-    if any(k in lower for k in (
-        "model not found", "is no longer available", "does not exist",
-        "unsupported model", "invalid_argument", "tool_use_failed"
-    )):
-        return False, f"client/model error: {sanitized}"
+    status_code = getattr(exc, "status_code", None) or getattr(exc, "http_status", None)
+    if status_code is None and hasattr(exc, "response") and hasattr(exc.response, "status_code"):
+        status_code = exc.response.status_code
 
-    # 4. If it is purely an application error without HTTP or provider failure markers
-    if isinstance(exc, non_retryable_types) and not any(k in lower for k in ("429", "500", "502", "503", "504", "rate limit", "quota", "timeout")):
+    if status_code in (400, 401, 403, 404, 429, 500, 502, 503, 504):
+        return True, sanitized
+
+    exc_cls = type(exc).__name__
+    if any(k in exc_cls for k in (
+        "RateLimit", "Quota", "Auth", "NotFound", "BadRequest",
+        "APIError", "APIConnection", "Timeout", "ServiceUnavailable",
+        "InternalServer", "PermissionDenied", "UnmappedModel",
+        "ResourceExhausted", "GoogleAPICallError"
+    )):
+        return True, sanitized
+
+    provider_keywords = (
+        "api_key", "invalid_api_key", "unauthorized", "authentication",
+        "permission", "forbidden", "rate limit", "rate_limit", "quota",
+        "too many requests", "429", "401", "403", "404", "500", "502", "503", "504",
+        "model not found", "does not exist", "unsupported model", "is not mapped",
+        "timeout", "timed out", "connection", "groq", "gemini", "openai",
+        "litellm", "resource_exhausted", "malformed llm response", "billing"
+    )
+    if any(k in lower for k in provider_keywords):
+        return True, sanitized
+
+    non_provider_types = (
+        ValueError,
+        KeyError,
+        TypeError,
+        AttributeError,
+        IndexError,
+        ImportError,
+    )
+    if isinstance(exc, non_provider_types):
         return False, sanitized
 
-    # 5. Check retryable HTTP status code
-    if status_code == 429:
-        return True, f"429 rate limit: {sanitized}"
-    if status_code in (500, 502, 503, 504):
-        return True, f"{status_code} provider error: {sanitized}"
-
-    # 6. Check LiteLLM / HTTP exception class names
-    exc_cls_name = type(exc).__name__
-    if any(k in exc_cls_name for k in ("RateLimitError", "QuotaExceeded", "ResourceExhausted")):
-        return True, f"429 rate limit: {sanitized}"
-    if any(k in exc_cls_name for k in ("Timeout", "TimeOut", "ConnectTimeout", "ReadTimeout")):
-        return True, f"timeout: {sanitized}"
-    if any(k in exc_cls_name for k in ("APIConnectionError", "ConnectError", "NetworkError", "ConnectionRefusedError")):
-        return True, f"connection failure: {sanitized}"
-    if any(k in exc_cls_name for k in ("ServiceUnavailableError", "InternalServerError", "BadGatewayError")):
-        return True, f"5xx provider error: {sanitized}"
-
-    # 7. String inspection for retryable provider error keywords
-    # Rate limit & Quota
-    if any(k in lower for k in (
-        "rate limit", "rate_limit", "quota exceeded", "quota", "429",
-        "resource_exhausted", "too many requests", "tokens per minute", "tpm", "rpm"
-    )):
-        return True, f"429 rate limit: {sanitized}"
-
-    # Temporary 5xx / Service unavailable / High demand / Overloaded
-    if any(k in lower for k in (
-        "500 internal server error", "502 bad gateway", "503 service unavailable",
-        "503", "504 gateway timeout", "504", "overloaded", "high demand",
-        "temporarily unavailable", "server is busy", "capacity", "unavailable"
-    )):
-        return True, f"5xx provider error: {sanitized}"
-
-    # Timeout & Connection
-    if any(k in lower for k in (
-        "timeout", "timed out", "connection reset", "connection refused",
-        "failed to connect", "network unreachable"
-    )):
-        return True, f"timeout / connection failure: {sanitized}"
-
-    # Otherwise non-retryable
     return False, sanitized
 

@@ -11,26 +11,45 @@ _ENV_PATH = _BACKEND_DIR / ".env"
 if _ENV_PATH.is_file():
     load_dotenv(dotenv_path=_ENV_PATH, override=False)
 
+def normalize_database_url(url: str) -> str:
+    """
+    Normalize database connection URLs.
+    Render, Heroku, and Supabase often output 'postgres://...', but SQLAlchemy 1.4+
+    requires 'postgresql://...'.
+    Preserves SQLite URLs ('sqlite://...') and already normalized 'postgresql://...'.
+    """
+    if not url:
+        return ""
+    trimmed = url.strip()
+    if trimmed.startswith("postgres://"):
+        return "postgresql://" + trimmed[len("postgres://"):]
+    return trimmed
+
+
 class Settings(BaseSettings):
     APP_NAME: str = "SmartVerify"
     DEBUG: bool = False
     SECRET_KEY: str = "changeme-use-strong-secret-in-production"
 
-    # Active LLM Provider: "groq" (default) or "gemini" (fallback)
-    LLM_PROVIDER: str = "groq"
-    GROQ_API_KEY: str = ""
-    groq_api_key: str = ""
-    GROQ_MODEL: str = "openai/gpt-oss-120b"
-
-    # Gemini settings (preserved as fallback)
+    # Active LLM Provider: "gemini" (primary runtime)
+    LLM_PROVIDER: str = "gemini"
     gemini_api_key: str = ""
     GEMINI_API_KEY: str = ""
     GOOGLE_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini/gemini-flash-latest"
+    GEMINI_MODEL: str = "gemini/gemini-flash-lite-latest"
+    GEMINI_FALLBACK_MODEL: str = "gemini/gemini-flash-latest"
+
+    # Alternative Provider Configuration (preserved, inactive in runtime cascade)
+    GROQ_API_KEY: str = ""
+    groq_api_key: str = ""
+    GROQ_MODEL: str = "openai/gpt-oss-120b"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 480
 
     DATABASE_URL: str = "postgresql://postgres:admin@db:5432/smartverify"
+    SEED_DEMO_USERS: bool = False
+    INITIAL_ADMIN_EMAIL: str = ""
+    INITIAL_ADMIN_PASSWORD: str = ""
     ALLOWED_ORIGINS: List[str] = [
         "http://localhost:3000",
         "http://localhost:8000",
@@ -42,6 +61,13 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "/app/uploads"
     REPORT_DIR: str = "/app/reports"
     MAX_UPLOAD_SIZE_MB: int = 20
+
+    # ── Storage Configuration (local or supabase) ──────────────────────────
+    STORAGE_PROVIDER: str = "local"
+    SUPABASE_URL: str = ""
+    SUPABASE_SERVICE_ROLE_KEY: str = ""
+    SUPABASE_DOCUMENTS_BUCKET: str = "applicant-documents"
+    SUPABASE_REPORTS_BUCKET: str = "generated-reports"
 
     OCR_LANGUAGE: str = "en"
     google_vision_api_key: str = ""
@@ -58,13 +84,19 @@ class Settings(BaseSettings):
     # multi-agent CrewAI pipeline (/verify-agentic).
     CREWAI_ENABLED: bool = True
     # Active model string passed to CrewAI LLM wrapper via LiteLLM:
-    CREWAI_MODEL: str = "openai/gpt-oss-120b"
+    CREWAI_MODEL: str = "gemini/gemini-flash-lite-latest"
     CREWAI_TEMPERATURE: float = 0.2
+    LLM_TIMEOUT: float = 90.0
+    LLM_REQUEST_TIMEOUT: float = 90.0
+    LLM_TIER_TIMEOUT_SECONDS: float = 175.0
+    WORKFLOW_TIMEOUT_SECONDS: float = 300.0
+    LLM_MAX_RETRIES: int = 2
     # API keys for the chosen LLM provider are read directly from the
     # environment by CrewAI/LiteLLM (e.g. GROQ_API_KEY, GEMINI_API_KEY).
 
     @model_validator(mode="after")
     def resolve_relative_paths(self):
+        self.DATABASE_URL = normalize_database_url(self.DATABASE_URL)
         if self.DATABASE_URL.startswith("sqlite:///./"):
             rel_path = self.DATABASE_URL[len("sqlite:///./"):]
             abs_db = (_BACKEND_DIR / rel_path).resolve()

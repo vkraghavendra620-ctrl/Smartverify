@@ -43,12 +43,73 @@ export const createApplication = (data) => api.post("/applications/", data);
 export const deleteApplication = (id)   => api.delete(`/applications/${id}`);
 
 // ── Documents ──────────────────────────────────────────────────────────────
+// In-flight processing tracking per document ID and per application doc type
+const processingDocIds = new Set();
+const processingTypes = new Set(); // format: `${appId}:${docType}`
+
+export const markDocumentProcessing = (docId, appId = null, docType = null) => {
+  if (docId) processingDocIds.add(Number(docId));
+  if (appId && docType) processingTypes.add(`${appId}:${docType}`);
+};
+
+export const unmarkDocumentProcessing = (docId, appId = null, docType = null) => {
+  if (docId) processingDocIds.delete(Number(docId));
+  if (appId && docType) processingTypes.delete(`${appId}:${docType}`);
+};
+
+export const isDocumentProcessing = (docId) => {
+  return docId ? processingDocIds.has(Number(docId)) : false;
+};
+
+export const isTypeProcessing = (appId, docType) => {
+  return (appId && docType) ? processingTypes.has(`${appId}:${docType}`) : false;
+};
+
 export const uploadDocument  = (formData) =>
   api.post("/documents/upload", formData);
-export const processDocument       = (docId)   => api.post(`/documents/process/${docId}`);
+
+// Multi-pass OCR legitimately takes 1–3 minutes.
+// Use a 4-minute per-request timeout so the global 60 s default is not hit.
+const PROCESS_DOCUMENT_TIMEOUT_MS = 4 * 60 * 1000; // 240 000 ms
+
+export const processDocument = async (docId) => {
+  const numId = Number(docId);
+  if (numId) processingDocIds.add(numId);
+  try {
+    return await api.post(
+      `/documents/process/${docId}`,
+      null,
+      { timeout: PROCESS_DOCUMENT_TIMEOUT_MS }
+    );
+  } finally {
+    if (numId) processingDocIds.delete(numId);
+  }
+};
+
+/**
+ * Returns true when an Axios error is a client-side request timeout
+ * (i.e. the per-request or instance timeout fired before the server responded).
+ * Use this to show "Document processing timed out" instead of the raw Axios message.
+ */
+export const isTimeoutError = (err) =>
+  err?.code === 'ECONNABORTED' || err?.message?.toLowerCase().includes('timeout');
+
 export const getDocuments          = (appId)   => api.get(`/documents/${appId}`);
-export const deleteDocument        = (docId)   => api.delete(`/documents/${docId}`);
-export const deleteDocumentsByType = (appId, docType) => api.delete(`/documents/by-type/${appId}/${docType}`);
+export const validateRequiredDocumentsApi = (appId) => api.get(`/documents/validate-required/${appId}`);
+
+export const deleteDocument = (docId) => {
+  if (isDocumentProcessing(docId)) {
+    return Promise.reject(new Error("Cannot delete document while it is being processed. Please wait."));
+  }
+  return api.delete(`/documents/${docId}`);
+};
+
+export const deleteDocumentsByType = (appId, docType) => {
+  if (isTypeProcessing(appId, docType)) {
+    return Promise.reject(new Error("Cannot delete document while it is being processed. Please wait."));
+  }
+  return api.delete(`/documents/by-type/${appId}/${docType}`);
+};
 
 // ── Government Verification Result Screenshots ─────────────────────────
 // Dedicated endpoints stored in government_verification_screenshots.
@@ -68,7 +129,9 @@ export const runVerification = (appId) => api.post(`/verify/${appId}`);
 // Agentic (CrewAI multi-agent) verification — can take longer due to
 // multiple sequential LLM calls across 5 agents, so use an extended timeout.
 export const runAgenticVerification = (appId) =>
-  api.post(`/verify/${appId}/agentic`, null, { timeout: 5 * 60 * 1000 });
+  api.post(`/verify/${appId}/agentic`, null, { timeout: 6 * 60 * 1000 });
+
+export const getVerificationStatus = (appId) => api.get(`/verify/${appId}/status`);
 
 // ── Reports ────────────────────────────────────────────────────────────────
 export const getReport       = (appId) => api.get(`/report/${appId}`);

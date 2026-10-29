@@ -164,22 +164,47 @@ def build_tasks(agents: dict, run_context: dict) -> list:
     # fall back to the application record values.
     merged_structured: dict = {}
     doc_structured_details = []
+    INTERNAL_METRIC_KEYS = {
+        "fields", "image_quality", "multi_pass", "field_confidences",
+        "extracted_text", "raw_text", "ocr_text", "full_text", "page_text", "text"
+    }
     for d in documents:
         raw_json = d.get("structured_data") or "{}"
         try:
             parsed = json.loads(raw_json) if isinstance(raw_json, str) else raw_json
         except Exception:
             parsed = {}
-        # Merge (prefer non-null values)
-        for k, v in parsed.items():
-            if v is not None:
-                merged_structured[k] = v
+
+        # Clean parsed dict by stripping bulky raw text dumps, OpenCV image quality metrics,
+        # and multi-pass OCR telemetry, while preserving all authoritative identity & financial fields.
+        clean_parsed = {}
+        if isinstance(parsed, dict):
+            for pk, pv in parsed.items():
+                if str(pk).lower() in INTERNAL_METRIC_KEYS:
+                    continue
+                if isinstance(pv, str) and len(pv) > 300:
+                    clean_parsed[pk] = pv[:300] + "... [truncated]"
+                elif isinstance(pv, (str, int, float, bool)) or pv is None:
+                    clean_parsed[pk] = pv
+                elif isinstance(pv, dict):
+                    clean_sub = {sk: sv for sk, sv in pv.items() if str(sk).lower() not in INTERNAL_METRIC_KEYS and not isinstance(sv, (dict, list))}
+                    if clean_sub:
+                        clean_parsed[pk] = clean_sub
+        else:
+            clean_parsed = parsed
+
+        # Merge (prefer non-null values, excluding bulk text dumps)
+        if isinstance(clean_parsed, dict):
+            for k, v in clean_parsed.items():
+                if v is not None:
+                    merged_structured[k] = v
+
         doc_structured_details.append({
             "doc_id": d["id"],
             "document_type": d["document_type"],
             "file_path": d.get("file_path", ""),
-            "has_structured_data": bool(parsed),
-            "structured_data": parsed,
+            "has_structured_data": bool(clean_parsed),
+            "structured_data": clean_parsed,
         })
 
     # Fallback applicant profile fields from application record
@@ -278,7 +303,7 @@ def build_tasks(agents: dict, run_context: dict) -> list:
             '    "input": "<summary of input data>",\n'
             '    "reasoning": "<step-by-step reasoning for document quality and completeness>",\n'
             '    "evidence_used": ["<evidence 1>", "<evidence 2>"],\n'
-            '    "tools_invoked": ["document_ocr_tool"],\n'
+            '    "tools_invoked": [<list of tools used, e.g. ["document_ocr_tool"] or [] if verified from metadata>],\n'
             '    "confidence": <number 0-100>,\n'
             '    "decision": "<final analytical decision>"\n'
             '  }\n'
@@ -370,12 +395,10 @@ def build_tasks(agents: dict, run_context: dict) -> list:
             "4. At least one income document (salary_slip, income_cert, or form_16) must be present.\n"
             "5. Identity documents (aadhaar, pan) must be present.\n"
             "6. For vehicle loans, vehicle documents (vehicle_document or invoice) should be acknowledged and considered.\n\n"
-            "CRITICAL: BEFORE making any recommendation, you MUST use the policy_retrieval_tool to retrieve:\n"
-            "  - Relevant Bank Policies\n"
-            "  - Loan Eligibility Policies\n"
-            "  - Income Policies\n"
-            "  - Loan Type Policies\n"
-            "You MUST reference the retrieved policies in your reasoning and include them in your output.\n\n"
+            "CRITICAL CONSTRAINTS & POLICY RETRIEVAL:\n"
+            "  - BEFORE making any recommendation, query the vector database using policy_retrieval_tool with a single comprehensive query (e.g., 'bank loan eligibility and income policies for {loan_type}'). Do NOT invoke policy_retrieval_tool multiple times with redundant queries.\n"
+            "  - You MUST reference the retrieved policies in your reasoning. If policy retrieval fails or returns no matches, truthfully report that policies were unavailable rather than fabricating or hallucinating policy references.\n"
+            "  - INCOME INTEGRITY: If monthly_income is null, missing, or unverified in the applicant profile, do NOT invent, assume, or infer it without evidence. Fail the income check and recommend manual review or rejection accordingly.\n\n"
             "Return ONLY a JSON object with this exact shape:\n"
             "{\n"
             '  "eligibility": "eligible" | "ineligible" | "review_required",\n'
@@ -420,13 +443,9 @@ def build_tasks(agents: dict, run_context: dict) -> list:
             "using the Government Verification UI (Aadhaar/PAN/Tax portals):\n"
             f"{gov_record_json}\n\n"
             "Your task is to analyze this manual record against the applicant profile.\n"
-            "CRITICAL: BEFORE performing verification, you MUST use the similarity_search_tool to retrieve:\n"
-            "  - Similar historical applications\n"
-            "  - Previous fraud cases\n"
-            "  - Similar Aadhaar/PAN records\n"
-            "  - Previous loan decisions\n"
-            "CRITICAL: You MUST also use the fraud_detection_tool with the applicant profile to check for duplicate Aadhaar, PAN, and other historical fraud patterns.\n"
-            "You MUST use this retrieved historical context and fraud tool output in your reasoning.\n\n"
+            "CRITICAL: BEFORE performing verification, use the similarity_search_tool with a single query containing the applicant profile to retrieve historical applications and previous decisions. Do NOT call similarity_search_tool repeatedly.\n"
+            "CRITICAL: You MUST also invoke the fraud_detection_tool with the applicant profile to check for duplicate Aadhaar, PAN, and other historical fraud patterns.\n"
+            "You MUST use this retrieved historical context and fraud tool output in your reasoning. If similarity search returns no records or fails, truthfully record zero similar cases rather than fabricating case history.\n\n"
             "Rules:\n"
             "  1. Verify the OCR-extracted aadhaar_number and pan_number from the profile match the officer's record.\n"
             "  2. Verify aadhaar_validity_status in the officer's record is 'Valid'.\n"

@@ -18,6 +18,7 @@ from app.models.application import Application
 from app.models.government_screenshot import GovernmentVerificationScreenshot
 from app.models.user import User
 from app.core.security import get_current_user
+from app.api.endpoints.documents import authorize_application_access
 from app.core.config import settings
 
 router = APIRouter()
@@ -78,8 +79,7 @@ async def upload_gov_screenshot(
     app = db.query(Application).filter(Application.id == application_id).first()
     if not app:
         raise HTTPException(status_code=404, detail="Application not found")
-    if current_user.role != "admin" and app.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Access denied")
+    authorize_application_access(app, current_user)
 
     norm_type_key = (verification_type or "").strip().lower()
     if norm_type_key not in VERIFICATION_TYPE_MAP:
@@ -148,8 +148,7 @@ def list_gov_screenshots(
     app = db.query(Application).filter(Application.id == application_id).first()
     if not app:
         raise HTTPException(status_code=404, detail="Application not found")
-    if current_user.role != "admin" and app.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Access denied")
+    authorize_application_access(app, current_user)
 
     shots = (
         db.query(GovernmentVerificationScreenshot)
@@ -179,8 +178,16 @@ def delete_gov_screenshot(
         raise HTTPException(status_code=404, detail="Government screenshot not found")
 
     app = db.query(Application).filter(Application.id == shot.application_id).first()
-    if app and current_user.role != "admin" and app.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Access denied")
+    if not app:
+        # Orphaned screenshot: application record missing. Only administrators can clean up.
+        role_val = current_user.role.value if hasattr(current_user.role, "value") else str(getattr(current_user, "role", ""))
+        if role_val != "admin":
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied: application record not found. Administrator privileges required for orphaned cleanup.",
+            )
+    else:
+        authorize_application_access(app, current_user)
 
     if shot.screenshot_path and os.path.exists(shot.screenshot_path):
         try:

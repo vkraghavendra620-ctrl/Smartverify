@@ -30,16 +30,23 @@ class FraudDetector:
         details = []
         risk_score = 0.0
 
-        # ── 1. Missing critical documents ─────────────────────────────────
-        doc_types = {d.get("document_type") for d in documents}
+        # ── 1. Missing critical documents (only Aadhaar & PAN mandatory) ──
+        doc_types = set()
+        for d in documents:
+            dt = d.get("document_type")
+            if hasattr(dt, "value"):
+                doc_types.add(str(dt.value).strip().lower())
+            elif dt:
+                doc_types.add(str(dt).strip().lower())
         missing = []
-        for req in ("aadhaar", "pan", "salary_slip"):
+        for req in ("aadhaar", "pan"):
             if req not in doc_types:
                 missing.append(req)
         if missing:
             score_add = 10 * len(missing)
             risk_score += score_add
-            msg = f"Missing required documents: {missing}"
+            missing_labels = ["Aadhaar Card" if m == "aadhaar" else "PAN Card" if m == "pan" else m for m in missing]
+            msg = f"Missing required documents: {missing_labels}"
             alerts.append(msg)
             details.append({"check": "missing_documents", "risk_added": score_add, "detail": msg})
 

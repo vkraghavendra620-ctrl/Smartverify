@@ -24,25 +24,24 @@ def smoke_test_groq_configuration():
     # 1. Config Check
     from app.core.config import settings
     print("\n[1] Checking Settings...")
-    provider = getattr(settings, "LLM_PROVIDER", "groq")
-    model = getattr(settings, "GROQ_MODEL", "openai/gpt-oss-120b")
+    provider = getattr(settings, "LLM_PROVIDER", "gemini")
+    groq_model = getattr(settings, "GROQ_MODEL", "openai/gpt-oss-120b")
     print(f"    Active LLM_PROVIDER : {provider}")
-    print(f"    Active GROQ_MODEL    : {model}")
-    assert provider == "groq", f"Expected provider 'groq', got {provider}"
-    assert model == "openai/gpt-oss-120b", f"Unexpected model {model}"
+    print(f"    Preserved GROQ_MODEL: {groq_model}")
+    assert groq_model == "openai/gpt-oss-120b", f"Unexpected model {groq_model}"
 
-    # 2. LLM Construction Check
-    print("\n[2] Checking get_llm() resolution...")
+    # 2. LLM Construction Check (Preserved Groq provider)
+    print("\n[2] Checking get_llm(provider='groq') resolution...")
     from app.agents.agent_definitions import get_llm
-    llm = get_llm()
+    llm = get_llm(provider="groq")
     print(f"    llm.model           : {llm.model}")
     print(f"    llm provider type   : {getattr(llm, 'provider', 'litellm')}")
-    assert llm.model == "openai/gpt-oss-120b"
+    assert "openai/gpt-oss-120b" in llm.model
 
     # 3. Agent Construction Check
-    print("\n[3] Building all 5 agents...")
+    print("\n[3] Building all 5 agents with preserved Groq provider...")
     from app.agents.agent_definitions import build_agents
-    agents = build_agents(db_session=None)
+    agents = build_agents(db_session=None, provider="groq")
     expected_agents = [
         ("document_analyst", "Document Analyst"),
         ("extraction_specialist", "Data Extraction Specialist"),
@@ -54,7 +53,7 @@ def smoke_test_groq_configuration():
         assert key in agents, f"Missing agent '{key}'"
         agent = agents[key]
         assert agent.role == role, f"Agent {key} role mismatch: {agent.role}"
-        assert agent.llm.model == "openai/gpt-oss-120b", (
+        assert "openai/gpt-oss-120b" in agent.llm.model, (
             f"Agent {key} using wrong model: {agent.llm.model}"
         )
         print(f"    OK [{key}]: role='{agent.role}', model='{agent.llm.model}'")

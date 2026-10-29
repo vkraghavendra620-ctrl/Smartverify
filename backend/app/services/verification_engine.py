@@ -61,8 +61,11 @@ class VerificationEngine:
         verification_score = (earned / total_weight) * 100 if total_weight else 0
 
         # ── Determine status ──────────────────────────────────────────────
+        income_check = next((c for c in checks if c["name"] == "Income Verification"), None)
+        income_failed = income_check is not None and not income_check.get("passed", True)
+
         if verification_score >= settings.MIN_VERIFICATION_SCORE:
-            status = "approved"
+            status = "manual_review" if income_failed else "approved"
         elif verification_score >= 40:
             status = "manual_review"
         else:
@@ -114,18 +117,41 @@ class VerificationEngine:
         }
 
     def _check_required_docs(self, documents: List[Dict]) -> Dict:
-        """Check that at least identity + income proof are present."""
-        types = {d.get("document_type") for d in documents}
-        has_id     = bool(types & {"aadhaar", "pan"})
+        """Check that mandatory documents (Aadhaar Card and PAN Card) are present."""
+        types = set()
+        for d in documents:
+            dt = d.get("document_type")
+            if hasattr(dt, "value"):
+                types.add(str(dt.value).strip().lower())
+            elif dt:
+                types.add(str(dt).strip().lower())
+        has_aadhaar = "aadhaar" in types
+        has_pan     = "pan" in types
+        has_mandatory = has_aadhaar and has_pan
+
+        # Optional documents for additional context
         has_income = bool(types & {"salary_slip", "income_cert", "form_16"})
         has_bank   = "bank_statement" in types
-        score = (0.4 * has_id) + (0.4 * has_income) + (0.2 * has_bank)
+
+        # Score is 1.0 when both mandatory docs are present
+        score = 1.0 if has_mandatory else (0.5 if (has_aadhaar or has_pan) else 0.0)
+        missing_parts = []
+        if not has_aadhaar:
+            missing_parts.append("Aadhaar Card")
+        if not has_pan:
+            missing_parts.append("PAN Card")
+
+        if has_mandatory:
+            details = f"Mandatory documents (Aadhaar Card and PAN Card) present. Optional docs: Income={has_income}, Bank={has_bank}"
+        else:
+            details = f"Missing mandatory documents: {', '.join(missing_parts)}"
+
         return {
             "name": "Required Documents",
             "score": score,
             "weight": 25,
-            "details": f"Identity: {has_id}, Income: {has_income}, Bank: {has_bank}",
-            "passed": has_id and has_income,
+            "details": details,
+            "passed": has_mandatory,
         }
 
     def _check_pan_format(self, info: Dict) -> Dict:

@@ -1,16 +1,18 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useDropzone } from 'react-dropzone';
 import {
   Upload, FileCheck, AlertCircle, Loader, Plus, X,
   MapPin, Camera, ChevronDown, ChevronUp, User, Briefcase, Home, Image,
-  CheckCircle, FileText, AlertTriangle
+  CheckCircle, FileText, AlertTriangle, ArrowRight
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import {
   uploadDocument, processDocument, getDocuments,
   getApplications, submitSiteVerification, submitJointApplicant, submitPropertyDetails,
-  updateApplicantDetails
+  updateApplicantDetails,
+  markDocumentProcessing, unmarkDocumentProcessing, isDocumentProcessing, isTypeProcessing,
+  isTimeoutError,
 } from '../services/api';
 import { PROPERTY_CONDITIONS } from '../utils/constants';
 
@@ -28,12 +30,66 @@ const EMPLOYMENT_DOCS = [
 ];
 
 const PROPERTY_DOCS = [
-  { value: 'sale_deed',          label: 'Sale Deed', required: true },
-  { value: 'tax_receipt',        label: 'Tax Receipt', required: true },
-  { value: 'encumbrance_cert',   label: 'Encumbrance Certificate', required: true },
+  { value: 'sale_deed',          label: 'Sale Deed' },
+  { value: 'tax_receipt',        label: 'Tax Receipt' },
+  { value: 'encumbrance_cert',   label: 'Encumbrance Certificate' },
   { value: 'building_plan',      label: 'Building Plan' },
   { value: 'ownership_proof',    label: 'Ownership Proof' },
 ];
+
+/**
+ * Validates that mandatory documents (Aadhaar Card and PAN Card) are present.
+ * All other document types remain optional.
+ */
+export function validateRequiredDocuments(docs = []) {
+  const hasAadhaar = docs.some(d => {
+    const dt = d.document_type?.value || d.document_type;
+    return dt === 'aadhaar' && !d.joint_applicant_index;
+  });
+  const hasPan = docs.some(d => {
+    const dt = d.document_type?.value || d.document_type;
+    return dt === 'pan' && !d.joint_applicant_index;
+  });
+
+  const missing = [];
+  if (!hasAadhaar) missing.push('Aadhaar Card');
+  if (!hasPan) missing.push('PAN Card');
+
+  if (missing.length === 2) {
+    return {
+      isValid: false,
+      missing,
+      hasAadhaar,
+      hasPan,
+      message: 'Aadhaar Card and PAN Card are missing. Both are required to proceed.',
+    };
+  }
+  if (!hasAadhaar) {
+    return {
+      isValid: false,
+      missing,
+      hasAadhaar,
+      hasPan,
+      message: 'Aadhaar Card is missing and is required to proceed.',
+    };
+  }
+  if (!hasPan) {
+    return {
+      isValid: false,
+      missing,
+      hasAadhaar,
+      hasPan,
+      message: 'PAN Card is missing and is required to proceed.',
+    };
+  }
+  return {
+    isValid: true,
+    missing: [],
+    hasAadhaar: true,
+    hasPan: true,
+    message: 'Mandatory documents (Aadhaar Card and PAN Card) uploaded successfully.',
+  };
+}
 
 const PROPERTY_IMAGES = [
   { value: 'site_front_view',   label: 'Front View' },
@@ -50,6 +106,10 @@ const JOINT_DOC_TYPES = [
 ];
 
 const parseBackendError = (err) => {
+  // Show a clean message for request timeouts (e.g. multi-pass OCR exceeding 60 s).
+  if (isTimeoutError(err)) {
+    return 'Document processing timed out. Please try again.';
+  }
   const detail = err.response?.data?.detail;
   if (!detail) {
     return err.message || 'Unknown server error';
@@ -76,6 +136,8 @@ function DocDropzone({ label, docType, applicationId, jointIndex, existingDoc, o
   const [uploading, setUploading] = useState(false);
   const [replacing, setReplacing] = useState(false);
 
+  const isDocProcessing = uploading || isTypeProcessing(applicationId, docType) || (existingDoc?.id && isDocumentProcessing(existingDoc.id)) || existingDoc?.processed === 1;
+
   useEffect(() => {
     if (file && file.type.startsWith('image/')) {
       const url = URL.createObjectURL(file);
@@ -86,21 +148,24 @@ function DocDropzone({ label, docType, applicationId, jointIndex, existingDoc, o
   }, [file]);
 
   const onDrop = useCallback((accepted) => {
+    if (isDocProcessing) return;
     if (accepted.length > 0) {
       setFile(accepted[0]);
     }
-  }, []);
+  }, [isDocProcessing]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
+    disabled: isDocProcessing,
     accept: { 'image/*': ['.jpg','.jpeg','.png'], 'application/pdf': ['.pdf'] },
     maxFiles: 1,
     maxSize: 20 * 1024 * 1024,
   });
 
   const handleUpload = async () => {
-    if (!file) return;
+    if (!file || isDocProcessing) return;
     setUploading(true);
+    markDocumentProcessing(null, applicationId, docType);
     let uploadedDoc = null;
     try {
       const fd = new FormData();
@@ -111,9 +176,13 @@ function DocDropzone({ label, docType, applicationId, jointIndex, existingDoc, o
       
       const { data: doc } = await uploadDocument(fd);
       uploadedDoc = doc;
+      if (uploadedDoc?.id) {
+        markDocumentProcessing(uploadedDoc.id, applicationId, docType);
+      }
     } catch (err) {
       const reason = parseBackendError(err);
       toast.error(`Failed to upload ${label}: ${reason}`);
+      unmarkDocumentProcessing(null, applicationId, docType);
       setUploading(false);
       return;
     }
@@ -132,10 +201,16 @@ function DocDropzone({ label, docType, applicationId, jointIndex, existingDoc, o
       setFile(null);
       setReplacing(false);
     } catch (err) {
-      toast.error('Document uploaded, but processing requires review');
+      const reason = parseBackendError(err);
+      toast.error(reason || 'Document uploaded, but processing requires review');
       setFile(null);
       setReplacing(false);
     } finally {
+      if (uploadedDoc?.id) {
+        unmarkDocumentProcessing(uploadedDoc.id, applicationId, docType);
+      } else {
+        unmarkDocumentProcessing(null, applicationId, docType);
+      }
       if (onUploaded) onUploaded();
       setUploading(false);
     }
@@ -150,9 +225,16 @@ function DocDropzone({ label, docType, applicationId, jointIndex, existingDoc, o
           <span className='text-xs font-medium text-green-700 truncate' title={existingDoc.original_name}>
             {existingDoc.original_name || 'Uploaded'}
           </span>
-          <button onClick={() => setReplacing(true)} className='ml-auto text-xs text-blue-600 hover:text-blue-800 font-medium underline flex-shrink-0'>
-            Replace
-          </button>
+          {isDocProcessing ? (
+            <span className='ml-auto text-xs text-blue-700 font-medium flex items-center gap-1.5 bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-md' title="Processing document... Please wait.">
+              <Loader className='w-3 h-3 animate-spin text-blue-600' />
+              Processing document... Please wait.
+            </span>
+          ) : (
+            <button onClick={() => setReplacing(true)} className='ml-auto text-xs text-blue-600 hover:text-blue-800 font-medium underline flex-shrink-0'>
+              Replace
+            </button>
+          )}
         </div>
       </div>
     );
@@ -163,13 +245,19 @@ function DocDropzone({ label, docType, applicationId, jointIndex, existingDoc, o
       <div className='flex justify-between items-center'>
         <p className='text-sm font-medium text-slate-700'>{label}</p>
         {existingDoc && replacing && (
-          <button onClick={() => { setReplacing(false); setFile(null); }} className='text-xs text-slate-500 hover:text-slate-700 underline'>
+          <button
+            onClick={() => { if (!isDocProcessing) { setReplacing(false); setFile(null); } }}
+            disabled={isDocProcessing}
+            className='text-xs text-slate-500 hover:text-slate-700 underline disabled:opacity-50 disabled:cursor-not-allowed'
+          >
             Cancel
           </button>
         )}
       </div>
       
-      <div {...getRootProps()} className={`flex-1 flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors ${isDragActive ? 'border-blue-400 bg-blue-50' : 'border-slate-300 hover:border-blue-400'}`}>
+      <div {...getRootProps()} className={`flex-1 flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-4 text-center transition-colors ${
+        isDocProcessing ? 'cursor-not-allowed border-blue-200 bg-blue-50/30' : isDragActive ? 'cursor-pointer border-blue-400 bg-blue-50' : 'cursor-pointer border-slate-300 hover:border-blue-400'
+      }`}>
         <input {...getInputProps()} />
         {file ? (
            previewUrl ? (
@@ -183,6 +271,12 @@ function DocDropzone({ label, docType, applicationId, jointIndex, existingDoc, o
                <p className='text-xs text-blue-700 font-medium truncate w-full'>{file.name}</p>
              </div>
            )
+        ) : isDocProcessing ? (
+          <div className="flex flex-col items-center gap-2">
+            <Loader className="h-6 w-6 text-blue-600 animate-spin" />
+            <p className='text-xs font-semibold text-blue-700'>Processing document... Please wait.</p>
+            <p className='text-[10px] text-slate-400'>Controls locked during OCR</p>
+          </div>
         ) : (
           <div className="flex flex-col items-center gap-2">
             <Upload className="h-6 w-6 text-slate-400" />
@@ -194,12 +288,12 @@ function DocDropzone({ label, docType, applicationId, jointIndex, existingDoc, o
       
       {file && (
         <div className='flex gap-2 mt-2'>
-          <button onClick={handleUpload} disabled={uploading}
-            className='btn-primary flex-1 flex items-center justify-center gap-1 text-xs py-1.5'>
-            {uploading ? <Loader className='w-3 h-3 animate-spin' /> : <Upload className='w-3 h-3' />}
-            {uploading ? 'Processing…' : 'Upload'}
+          <button onClick={handleUpload} disabled={isDocProcessing}
+            className='btn-primary flex-1 flex items-center justify-center gap-1 text-xs py-1.5 disabled:opacity-50 disabled:cursor-not-allowed'>
+            {isDocProcessing ? <Loader className='w-3 h-3 animate-spin' /> : <Upload className='w-3 h-3' />}
+            {isDocProcessing ? 'Processing document... Please wait.' : 'Upload'}
           </button>
-          <button onClick={() => setFile(null)} disabled={uploading} className='p-1.5 text-slate-400 hover:text-slate-600 bg-slate-100 rounded hover:bg-slate-200 transition-colors'>
+          <button onClick={() => { if (!isDocProcessing) setFile(null); }} disabled={isDocProcessing} className='p-1.5 text-slate-400 hover:text-slate-600 bg-slate-100 rounded hover:bg-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'>
             <X className='w-4 h-4' />
           </button>
         </div>
@@ -605,11 +699,26 @@ function ApplicantDetailsCard({ applicationId, uploadedDocs, currentApp, onSaved
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function UploadPage() {
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [applicationId, setAppId] = useState(searchParams.get('app') || '');
   const [apps, setApps]           = useState([]);
   const [uploadedDocs, setUploadedDocs] = useState([]);
   const [jointApplicants, setJA]  = useState([1]);
+
+  const handleProceed = () => {
+    if (!applicationId) {
+      toast.error('Please select an application first.');
+      return;
+    }
+    const val = validateRequiredDocuments(uploadedDocs);
+    if (!val.isValid) {
+      toast.error(val.message);
+      return;
+    }
+    toast.success('Mandatory documents verified. Proceeding to verification...');
+    navigate(`/verify?app=${applicationId}`);
+  };
 
   // Property Details form
   const [propForm, setPropForm] = useState({
@@ -732,10 +841,44 @@ export default function UploadPage() {
           
           {/* Document Validation Dashboard */}
           <div className='card shadow-sm rounded-xl bg-white border border-blue-100'>
-            <div className='flex items-center gap-3 border-b pb-4 mb-4'>
-              <FileCheck className='w-6 h-6 text-blue-600' />
-              <h3 className='font-semibold text-lg text-slate-800'>Document Validation</h3>
+            <div className='flex flex-col sm:flex-row sm:items-center justify-between border-b pb-4 mb-4 gap-3'>
+              <div className='flex items-center gap-3'>
+                <FileCheck className='w-6 h-6 text-blue-600 flex-shrink-0' />
+                <div>
+                  <h3 className='font-semibold text-lg text-slate-800'>Document Validation</h3>
+                  <p className='text-xs text-slate-500'>Aadhaar Card and PAN Card are required to proceed</p>
+                </div>
+              </div>
+              <button
+                type='button'
+                onClick={handleProceed}
+                id='proceed-verification-top-btn'
+                className='btn-primary px-4 py-2 flex items-center gap-2 text-sm shadow-sm self-start sm:self-auto'
+              >
+                Proceed to Verification <ArrowRight className='w-4 h-4' />
+              </button>
             </div>
+
+            {/* Validation Message Banner */}
+            {(() => {
+              const val = validateRequiredDocuments(uploadedDocs);
+              return (
+                <div className='mb-4'>
+                  {val.isValid ? (
+                    <div className='flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-800 font-medium'>
+                      <CheckCircle className='w-4 h-4 text-emerald-600 flex-shrink-0' />
+                      <span>{val.message}</span>
+                    </div>
+                  ) : (
+                    <div className='flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 font-medium'>
+                      <AlertCircle className='w-4 h-4 text-amber-600 flex-shrink-0' />
+                      <span>{val.message}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             <div className='grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3'>
               {APPLICANT_DOCS.map(doc => {
                 const isUploaded = !!getDoc(doc.value);
@@ -815,7 +958,7 @@ export default function UploadPage() {
             const reqDocs = PROPERTY_DOCS.filter(d => d.required);
             const docsUp = PROPERTY_DOCS.filter(d => getDoc(d.value)).length;
             const imgsUp = PROPERTY_IMAGES.filter(d => getDoc(d.value)).length;
-            const pendingDocs = reqDocs.filter(d => !getDoc(d.value)).length + (imgsUp === 0 ? 1 : 0);
+            const pendingDocs = reqDocs.filter(d => !getDoc(d.value)).length;
             return (
               <div className='card shadow-sm rounded-xl bg-white border border-orange-100'>
                 <div className='flex items-center gap-3 border-b pb-4 mb-4'>
@@ -1099,6 +1242,26 @@ export default function UploadPage() {
               </div>
             </form>
           </Section>
+
+          {/* Bottom Progression Bar */}
+          <div className='flex flex-col sm:flex-row items-center justify-between card p-5 shadow-sm rounded-xl bg-white border border-slate-200 gap-4 mt-6'>
+            <div>
+              <p className='text-sm font-semibold text-slate-800'>Verification Readiness</p>
+              <p className='text-xs text-slate-500 mt-0.5'>
+                {validateRequiredDocuments(uploadedDocs).isValid
+                  ? 'Both Aadhaar Card and PAN Card have been uploaded. You can proceed to verification.'
+                  : validateRequiredDocuments(uploadedDocs).message}
+              </p>
+            </div>
+            <button
+              type='button'
+              onClick={handleProceed}
+              id='proceed-verification-bottom-btn'
+              className='btn-primary px-6 py-2.5 flex items-center gap-2 text-sm shadow-sm'
+            >
+              Proceed to Verification <ArrowRight className='w-4 h-4' />
+            </button>
+          </div>
         </div>
       )}
     </div>

@@ -76,12 +76,8 @@ export const BRANCHES = [
 export const LOAN_TYPES = [
   'Home Loan',
   'Personal Loan',
-  'Auto / Vehicle Loan',
-  'Education Loan',
+  'Vehicle Loan',
   'Business Loan',
-  'Mortgage Loan',
-  'Gold Loan',
-  'Agricultural Loan',
 ];
 
 export const PROPERTY_TYPES = [

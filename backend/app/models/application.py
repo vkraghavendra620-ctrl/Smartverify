@@ -10,6 +10,8 @@ class ApplicationStatus(str, enum.Enum):
     approved      = "approved"
     rejected      = "rejected"
     manual_review = "manual_review"
+    in_progress   = "in_progress"
+    failed        = "failed"
 
 class Application(Base):
     __tablename__ = "applications"
